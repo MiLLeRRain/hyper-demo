@@ -47,6 +47,7 @@
 | `/api/trades` | GET | 周期性 | 获取所有完成的交易记录 | HIT/公开缓存 |
 | `/api/account-totals` | GET | 定期更新 | 获取所有模型的账户总值和持仓 | STALE/公开缓存 |
 | `/api/since-inception-values` | GET | 低频 | 获取模型从开始至今的基准数据 | HIT/公开缓存 |
+| `/api/conversations` | GET | 点击ModelChat时 | **获取最近100条AI对话记录** | HIT/公开缓存 |
 | `/api/leaderboard` | GET | 按需 | 获取排行榜数据 | HIT/公开缓存 |
 | `/api/analytics/[model_id]` | GET | 按需 | 获取单个模型的详细分析数据 | HIT/公开缓存 |
 
@@ -271,6 +272,107 @@
 - `return_pct`: 回报率百分比
 - `num_trades`: 交易次数
 - `win_dollars` / `lose_dollars`: 盈利/亏损金额
+
+#### `/api/conversations` 响应结构 ⭐ **重要API**
+
+**触发时机**: 用户点击页面上的 "MODELCHAT" 按钮时触发
+
+**作用**: 返回所有AI模型最近的100条对话记录，包含完整的USER_PROMPT（发送给AI的提示词）和AI的决策输出
+
+```json
+{
+  "conversations": [
+    {
+      "id": "gemini-2.5-pro_1761776536.215783",
+      "user_prompt": "It has been 10631 minutes since you started trading. The current time is 2025-10-29 22:21:36.624342 and you've been invoked 5106 times. Below, we are providing you with a variety of state data, price data, and predictive signals so you can discover alpha...[完整11,053字符提示词]",
+      "response": "I'm holding all my short positions in ETH, SOL, BTC, DOGE, and BNB because the 4-hour charts show clear downtrends and their invalidation points are distant, while my long XRP position is still being monitored due to a weak short-term trend.",
+      "timestamp": "10/30 11:22:16",
+      "model_id": "gemini-2.5-pro",
+      "model_name": "GEMINI 2.5 PRO"
+    },
+    {
+      "id": "qwen3-max_1761776507.162847",
+      "user_prompt": "[完整USER_PROMPT内容]",
+      "response": "My portfolio's up 46% thanks to a profitable BTC trade, but it's time to hold steady. I'm keeping my 10x BTC long position open with a profit target of 114728 and a stop loss at 109020, with a keen eye on a 4H close below 108000 as a warning.",
+      "timestamp": "10/30 11:21:47",
+      "model_id": "qwen3-max",
+      "model_name": "QWEN3 MAX"
+    }
+  ]
+}
+```
+
+**USER_PROMPT 结构解析** (每条对话的 `user_prompt` 字段):
+
+完整的USER_PROMPT包含以下关键部分：
+
+1. **交易上下文信息**
+   - 交易运行时间（分钟数）
+   - 当前时间戳
+   - AI被调用次数
+
+2. **所有6个币种的完整市场数据**（BTC, ETH, SOL, BNB, DOGE, XRP）
+   每个币种包含：
+   - **当前状态**: current_price, current_ema20, current_macd, current_rsi
+   - **开放利息和资金费率**: Open Interest, Funding Rate
+   - **日内序列数据**（3分钟间隔，最近10个数据点）:
+     - Mid prices (价格序列)
+     - EMA indicators (20期)
+     - MACD indicators
+     - RSI indicators (7期和14期)
+   - **长期上下文**（4小时时间框架）:
+     - 20期和50期EMA
+     - 3期和14期ATR
+     - 当前成交量 vs 平均成交量
+     - MACD indicators (最近10个数据点)
+     - RSI indicators (14期，最近10个数据点)
+
+3. **账户信息和表现**
+   - Current Total Return (百分比)
+   - Available Cash (可用现金)
+   - Current Account Value (当前账户价值)
+   - Current live positions (当前持仓详情):
+     ```json
+     {
+       "symbol": "ETH",
+       "quantity": -2.49,
+       "entry_price": 4020.46,
+       "current_price": 3947.65,
+       "liquidation_price": 4138.39,
+       "unrealized_pnl": 181.3,
+       "leverage": 20,
+       "exit_plan": {
+         "profit_target": 3817.91,
+         "stop_loss": 4099.23,
+         "invalidation_condition": "4-hour price closes above the 20-period EMA."
+       },
+       "confidence": 0.75,
+       "risk_usd": 199.89
+     }
+     ```
+   - Sharpe Ratio (夏普比率)
+
+4. **AI需要输出的格式要求**
+   - CHAIN_OF_THOUGHT (思考链) - JSON格式
+   - TRADING_DECISIONS (交易决策) - 包含每个币种的具体操作
+
+**conversations 数组特点:**
+- **数量**: 返回最近的100条对话记录
+- **排序**: 按时间倒序排列（最新的在前）
+- **覆盖**: 包含所有6个AI模型的对话
+- **完整性**: 每条记录包含完整的输入提示词和AI输出
+- **可展开**: 前端UI上显示为"click to expand"可展开项
+
+**使用场景:**
+1. **查看AI决策过程**: 用户可以查看AI基于什么数据做出了什么决策
+2. **分析提示词**: 研究发送给AI的完整提示词结构
+3. **对比模型表现**: 同一时间不同模型对相同数据的不同反应
+4. **学习交易策略**: 观察成功模型的思考逻辑和决策模式
+
+**响应头信息:**
+- Content-Type: `application/json; charset=utf-8`
+- Cache-Control: `public, max-age=0, must-revalidate`
+- X-Vercel-Cache: `HIT` (Vercel CDN缓存)
 
 ### 2.3 网络请求行为模式
 
