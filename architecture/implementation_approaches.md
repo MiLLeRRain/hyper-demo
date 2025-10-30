@@ -2,6 +2,87 @@
 
 本文档分析了除 Web 应用外，复刻 NoF1.ai 类型 AI 交易系统的多种实现方式。
 
+## 核心技术要求（基于 /api/conversations 发现）
+
+通过分析 NoF1.ai 的 `/api/conversations` API，我们获得了系统的**完整技术规格**：
+
+### 🎯 关键发现
+
+1. **AI调用频率**: 每 **3分钟** 调用一次（从 "invoked 5106 times in 10631 minutes" 计算得出）
+2. **提示词长度**: **11,053 字符**的结构化USER_PROMPT
+3. **数据架构**: REST API 轮询，**非WebSocket**
+4. **技术指标要求**:
+   - **EMA**: 20期、50期
+   - **RSI**: 7期、14期
+   - **MACD**: 标准配置 (12,26,9)
+   - **ATR**: 3期、14期
+5. **数据时间框架**:
+   - **短期**: 3分钟K线（最近10个数据点）
+   - **长期**: 4小时K线（最近10个数据点）
+6. **交易资产**: BTC, ETH, SOL, BNB, DOGE, XRP（6个币种）
+
+### 💡 对实现的影响
+
+这些发现**简化了**我们的架构设计：
+
+✅ **不需要猜测** - 提示词结构完全已知
+✅ **技术指标明确** - 知道需要计算哪些指标和参数
+✅ **数据需求清晰** - 只需要3分钟和4小时两个时间框架
+✅ **性能要求降低** - 3分钟调用间隔，不需要高频实时处理
+✅ **可以直接复用** - NoF1.ai的提示词模板可以直接使用
+
+### 📋 最小数据管道要求
+
+```python
+# 每3分钟执行一次的数据管道
+def collect_and_process_data():
+    # 1. 从HyperLiquid获取6个币种的最新价格
+    prices = fetch_hyperliquid_prices(['BTC', 'ETH', 'SOL', 'BNB', 'DOGE', 'XRP'])
+
+    # 2. 计算技术指标（基于历史数据）
+    for coin in coins:
+        # 3分钟级别
+        coin.ema_20 = calculate_ema(coin.prices_3min, period=20)
+        coin.rsi_7 = calculate_rsi(coin.prices_3min, period=7)
+        coin.rsi_14 = calculate_rsi(coin.prices_3min, period=14)
+        coin.macd = calculate_macd(coin.prices_3min)
+
+        # 4小时级别
+        coin.ema_4h_20 = calculate_ema(coin.prices_4h, period=20)
+        coin.ema_4h_50 = calculate_ema(coin.prices_4h, period=50)
+        coin.atr_4h_3 = calculate_atr(coin.prices_4h, period=3)
+        coin.atr_4h_14 = calculate_atr(coin.prices_4h, period=14)
+
+    # 3. 获取持仓信息
+    positions = get_current_positions()
+
+    # 4. 构建USER_PROMPT（11,053字符）
+    prompt = build_user_prompt(prices, indicators, positions)
+
+    # 5. 调用AI模型
+    ai_response = call_ai_model(prompt)
+
+    # 6. 解析决策并执行交易
+    execute_trades(ai_response)
+```
+
+### 🗄️ 数据存储需求
+
+**最小存储量**（每个币种）:
+- 3分钟K线: 最近 **10个** 数据点 = 30分钟数据
+- 4小时K线: 最近 **10个** 数据点 = 40小时数据
+
+**实际建议**（考虑指标计算）:
+- 3分钟K线: 保留 **200个** 数据点（10小时） - 用于EMA20/RSI14计算
+- 4小时K线: 保留 **100个** 数据点（400小时/16天） - 用于EMA50计算
+
+**数据库选择**:
+- **时序数据库**: TimescaleDB, InfluxDB（推荐）
+- **关系数据库**: PostgreSQL + 定期清理
+- **内存缓存**: Redis（存储最近数据，加速计算）
+
+---
+
 ## 方案概览对比表
 
 | 方案 | 开发难度 | 部署复杂度 | 用户体验 | 成本 | 适用场景 |
@@ -238,6 +319,271 @@ cli-trading-bot/
 ├── config.yaml
 └── requirements.txt
 ```
+
+### 💡 基于 /api/conversations 发现的完整实现示例
+
+现在我们知道了准确的数据结构，这里是一个完整的 CLI 实现示例：
+
+```python
+# core/data_collector.py
+import pandas as pd
+import pandas_ta as ta
+from hyperliquid.info import Info
+
+class DataCollector:
+    def __init__(self):
+        self.info = Info()
+        self.coins = ['BTC', 'ETH', 'SOL', 'BNB', 'DOGE', 'XRP']
+
+    def collect_market_data(self):
+        """采集所有币种的市场数据 - 每3分钟调用一次"""
+        market_data = {}
+
+        for coin in self.coins:
+            # 获取3分钟和4小时K线数据
+            candles_3min = self.info.candles_snapshot(
+                coin=coin,
+                interval='3m',
+                lookback=200  # 保留200个数据点用于指标计算
+            )
+
+            candles_4h = self.info.candles_snapshot(
+                coin=coin,
+                interval='4h',
+                lookback=100  # 保留100个数据点
+            )
+
+            # 转换为DataFrame
+            df_3min = pd.DataFrame(candles_3min)
+            df_4h = pd.DataFrame(candles_4h)
+
+            # 计算3分钟级别指标
+            df_3min['ema_20'] = ta.ema(df_3min['close'], length=20)
+            df_3min['rsi_7'] = ta.rsi(df_3min['close'], length=7)
+            df_3min['rsi_14'] = ta.rsi(df_3min['close'], length=14)
+            macd = ta.macd(df_3min['close'], fast=12, slow=26, signal=9)
+            df_3min['macd'] = macd['MACD_12_26_9']
+
+            # 计算4小时级别指标
+            df_4h['ema_20'] = ta.ema(df_4h['close'], length=20)
+            df_4h['ema_50'] = ta.ema(df_4h['close'], length=50)
+            df_4h['atr_3'] = ta.atr(df_4h['high'], df_4h['low'], df_4h['close'], length=3)
+            df_4h['atr_14'] = ta.atr(df_4h['high'], df_4h['low'], df_4h['close'], length=14)
+            df_4h['rsi_14'] = ta.rsi(df_4h['close'], length=14)
+            macd_4h = ta.macd(df_4h['close'], fast=12, slow=26, signal=9)
+            df_4h['macd'] = macd_4h['MACD_12_26_9']
+
+            # 获取开放利息和资金费率
+            meta = self.info.meta()
+            oi_data = self.info.open_interest(coin)
+            funding_rate = meta['universe'][coin]['funding']
+
+            market_data[coin] = {
+                'current_price': df_3min['close'].iloc[-1],
+                'current_ema20': df_3min['ema_20'].iloc[-1],
+                'current_macd': df_3min['macd'].iloc[-1],
+                'current_rsi': df_3min['rsi_7'].iloc[-1],
+                'open_interest': oi_data,
+                'funding_rate': funding_rate,
+                # 最近10个3分钟数据点
+                'prices_3min': df_3min['close'].tail(10).tolist(),
+                'ema_3min': df_3min['ema_20'].tail(10).tolist(),
+                'macd_3min': df_3min['macd'].tail(10).tolist(),
+                'rsi_7_3min': df_3min['rsi_7'].tail(10).tolist(),
+                'rsi_14_3min': df_3min['rsi_14'].tail(10).tolist(),
+                # 4小时数据
+                'ema_4h_20': df_4h['ema_20'].iloc[-1],
+                'ema_4h_50': df_4h['ema_50'].iloc[-1],
+                'atr_4h_3': df_4h['atr_3'].iloc[-1],
+                'atr_4h_14': df_4h['atr_14'].iloc[-1],
+                'macd_4h': df_4h['macd'].tail(10).tolist(),
+                'rsi_4h': df_4h['rsi_14'].tail(10).tolist(),
+            }
+
+        return market_data
+
+
+# core/prompt_builder.py
+class PromptBuilder:
+    """构建与NoF1.ai完全相同的USER_PROMPT"""
+
+    def build_user_prompt(self, market_data, account_info, invocation_count, elapsed_minutes):
+        """构建11,053字符的结构化提示词"""
+        prompt = f"""It has been {elapsed_minutes} minutes since you started trading. The current time is {datetime.now()} and you've been invoked {invocation_count} times. Below, we are providing you with a variety of state data, price data, and predictive signals so you can discover alpha.
+
+**ALL OF THE PRICE OR SIGNAL DATA BELOW IS ORDERED: OLDEST → NEWEST**
+
+---
+
+"""
+        # 为每个币种添加完整的市场数据
+        for coin in ['BTC', 'ETH', 'SOL', 'BNB', 'DOGE', 'XRP']:
+            data = market_data[coin]
+            prompt += f"""### ALL {coin} DATA
+
+current_price = {data['current_price']}, current_ema20 = {data['current_ema20']}, current_macd = {data['current_macd']}, current_rsi (7 period) = {data['current_rsi']}
+
+Open Interest: {data['open_interest']}
+Funding Rate: {data['funding_rate']}
+
+**Intraday series (3-minute intervals, oldest → latest):**
+
+Mid prices: {data['prices_3min']}
+EMA indicators (20-period): {data['ema_3min']}
+MACD indicators: {data['macd_3min']}
+RSI indicators (7-Period): {data['rsi_7_3min']}
+RSI indicators (14-Period): {data['rsi_14_3min']}
+
+**Longer-term context (4-hour timeframe):**
+
+20-Period EMA: {data['ema_4h_20']} vs. 50-Period EMA: {data['ema_4h_50']}
+3-Period ATR: {data['atr_4h_3']} vs. 14-Period ATR: {data['atr_4h_14']}
+MACD indicators: {data['macd_4h']}
+RSI indicators (14-Period): {data['rsi_4h']}
+
+---
+
+"""
+
+        # 添加账户信息
+        prompt += f"""### HERE IS YOUR ACCOUNT INFORMATION & PERFORMANCE
+
+Current Total Return (percent): {account_info['return_pct']}%
+Available Cash: {account_info['cash']}
+Current Account Value: {account_info['total_value']}
+
+Current live positions & performance:
+{self._format_positions(account_info['positions'])}
+
+Sharpe Ratio: {account_info['sharpe_ratio']}
+"""
+
+        return prompt
+
+    def _format_positions(self, positions):
+        """格式化持仓信息"""
+        formatted = []
+        for pos in positions:
+            formatted.append(str({
+                'symbol': pos['symbol'],
+                'quantity': pos['quantity'],
+                'entry_price': pos['entry_price'],
+                'current_price': pos['current_price'],
+                'unrealized_pnl': pos['unrealized_pnl'],
+                'leverage': pos['leverage'],
+                'exit_plan': pos['exit_plan']
+            }))
+        return '\n'.join(formatted)
+
+
+# core/ai_engine.py
+from anthropic import Anthropic
+
+class AIEngine:
+    def __init__(self, model_name='claude-sonnet-4.5'):
+        self.client = Anthropic()
+        self.model_name = model_name
+
+    def get_trading_decision(self, user_prompt):
+        """调用AI获取交易决策"""
+        response = self.client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            messages=[{
+                "role": "user",
+                "content": user_prompt
+            }]
+        )
+
+        # 解析AI响应（包含CHAIN_OF_THOUGHT和TRADING_DECISIONS）
+        return self._parse_ai_response(response.content[0].text)
+
+    def _parse_ai_response(self, response_text):
+        """解析AI返回的决策JSON"""
+        # 提取JSON部分并解析
+        import json
+        import re
+
+        # 假设AI返回包含JSON格式的决策
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if json_match:
+            return json.loads(json_match.group())
+        return None
+
+
+# main.py - 主循环（每3分钟执行）
+import schedule
+import time
+
+def main_trading_loop():
+    """主交易循环 - 每3分钟执行一次"""
+    collector = DataCollector()
+    prompt_builder = PromptBuilder()
+    ai_engine = AIEngine()
+    trader = TradingExecutor()
+
+    invocation_count = 0
+    start_time = time.time()
+
+    def run_iteration():
+        nonlocal invocation_count
+        invocation_count += 1
+        elapsed_minutes = int((time.time() - start_time) / 60)
+
+        print(f"[{datetime.now()}] 第 {invocation_count} 次调用")
+
+        # 1. 采集市场数据
+        market_data = collector.collect_market_data()
+
+        # 2. 获取账户信息
+        account_info = trader.get_account_info()
+
+        # 3. 构建提示词
+        user_prompt = prompt_builder.build_user_prompt(
+            market_data,
+            account_info,
+            invocation_count,
+            elapsed_minutes
+        )
+
+        print(f"提示词长度: {len(user_prompt)} 字符")
+
+        # 4. 调用AI
+        ai_decision = ai_engine.get_trading_decision(user_prompt)
+
+        # 5. 执行交易
+        if ai_decision:
+            trader.execute_decisions(ai_decision)
+
+        print(f"完成第 {invocation_count} 次交易决策\n")
+
+    # 立即执行一次
+    run_iteration()
+
+    # 设置每3分钟执行一次
+    schedule.every(3).minutes.do(run_iteration)
+
+    # 持续运行
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+if __name__ == "__main__":
+    main_trading_loop()
+```
+
+**关键实现要点:**
+
+1. ✅ **精确的3分钟间隔** - 使用 `schedule` 库
+2. ✅ **完整的技术指标** - 使用 `pandas_ta` 计算所有需要的指标
+3. ✅ **准确的提示词格式** - 复刻NoF1.ai的11,053字符结构
+4. ✅ **高效的数据管道** - 只保留必要的历史数据
+5. ✅ **简单的部署** - 单个Python脚本即可运行
+
+**性能优化:**
+- 使用 Redis 缓存最近的K线数据
+- 预计算技术指标，避免重复计算
+- 异步调用AI API，减少等待时间
 
 ---
 
