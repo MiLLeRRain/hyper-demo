@@ -1,0 +1,44 @@
+# LLM Provider Configuration
+# Switch providers by changing 'active_provider' below
+
+# Which provider to use: 'deepseek_official' | 'qwen_official' | 'openrouter'
+active_provider: 'deepseek_official'
+
+providers:
+  deepseek_official:
+    base_url: 'https://api.deepseek.com/v1'
+    api_key: 'YOUR_DEEPSEEK_API_KEY'  # Get from https://platform.deepseek.com/
+    model: 'deepseek-chat'
+    pricing:
+      input: '$0.27/1M tokens'
+      output: '$1.10/1M tokens'
+      cache: '$0.027/1M tokens (90% discount)'
+
+  qwen_official:
+    base_url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
+    api_key: 'YOUR_QWEN_API_KEY'  # Get from https://help.aliyun.com/zh/dashscope/
+    model: 'qwen-plus'
+    pricing:
+      qwen_plus: '¥0.0008/1K tokens (input+output)'
+      qwen_max: '¥0.04/1K tokens (input+output)'
+
+  openrouter:
+    base_url: 'https://openrouter.ai/api/v1'
+    api_key: 'YOUR_OPENROUTER_API_KEY'  # Get from https://openrouter.ai/keys
+    models:
+      deepseek: 'deepseek/deepseek-chat'
+      qwen: 'qwen/qwen-2.5-72b-instruct'
+    pricing:
+      deepseek: '$0.27/1M input, $1.10/1M output'
+      qwen: '$0.54/1M input, $2.24/1M output'
+
+# Trading Configuration
+trading:
+  interval_minutes: 3  # AI decision interval
+  coins: ['BTC', 'ETH', 'SOL', 'BNB', 'DOGE', 'XRP']
+
+# HyperLiquid Configuration
+hyperliquid:
+  testnet: true  # Use testnet for development
+  mainnet_url: 'https://api.hyperliquid.xyz'
+  testnet_url: 'https://api.hyperliquid-testnet.xyz'
