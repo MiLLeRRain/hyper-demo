@@ -31,10 +31,13 @@
 
 ## 依赖
 - Phase 1: 数据采集完成
-- LLM Provider选择: `docs/05_references/llm/provider_guide.md`
+- LLM Provider选择: `docs/05_references/llm/llm_provider_guide.md`
 
 ---
 
 ## 参考
 - `docs/00_research/nof1_ai_system_prompts_and_outputs.md`: NoF1.ai的Prompt示例
+- `docs/00_research/nof1_ai_analysis.md`: NoF1.ai系统分析
+- `docs/05_references/llm/llm_provider_guide.md`: LLM提供商选择指南
+- `docs/05_references/llm/deepseek_model_comparison.md`: DeepSeek模型对比
 - `docs/05_references/llm/cost_calculator.md`: 成本估算

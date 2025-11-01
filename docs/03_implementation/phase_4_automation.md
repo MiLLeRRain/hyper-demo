@@ -36,4 +36,6 @@
 
 ## 参考
 - `.claude/code_standards.md`: CLI工具开发规范
+- `.claude/testing_strategy.md`: 测试策略
 - `docs/02_architecture/system_overview.md`: 系统架构
+- `docs/00_research/nof1_ai_analysis.md`: NoF1.ai运行机制参考

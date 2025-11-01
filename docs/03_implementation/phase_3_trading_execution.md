@@ -36,5 +36,7 @@
 ---
 
 ## 参考
-- `docs/05_references/hyperliquid/margin_and_fees_CN.md`: 保证金和费用规则
+- `docs/05_references/hyperliquid/hyperliquid_trading_api_guide_CN.md`: 交易API完整指南
+- `docs/05_references/hyperliquid/hyperliquid_margin_and_fees_CN.md`: 保证金和费用规则
+- `docs/05_references/hyperliquid/hyperliquid_api_data_availability_CN.md`: 订单和持仓数据查询
 - `.claude/testing_strategy.md`: 交易系统测试策略

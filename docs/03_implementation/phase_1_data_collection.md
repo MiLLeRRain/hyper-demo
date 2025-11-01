@@ -37,3 +37,5 @@
 ## 参考
 - `.claude/testing_strategy.md`: 测试要求
 - `docs/02_architecture/system_overview.md`: 系统架构
+- `docs/05_references/hyperliquid/hyperliquid_api_data_availability_CN.md`: 数据API详细文档
+- `docs/00_research/implementation_approaches.md`: 技术选型参考
