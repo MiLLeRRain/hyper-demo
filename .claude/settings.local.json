@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude mcp add chrome-devtools \"npx chrome-devtools-mcp@latest\")",
+      "mcp__chrome-devtools__list_pages",
+      "mcp__chrome-devtools__navigate_page",
+      "mcp__chrome-devtools__take_snapshot",
+      "mcp__chrome-devtools__list_network_requests",
+      "mcp__chrome-devtools__get_network_request",
+      "mcp__chrome-devtools__take_screenshot",
+      "mcp__chrome-devtools__click",
+      "mcp__chrome-devtools__evaluate_script",
+      "WebFetch(domain:hyperliquid.gitbook.io)",
+      "Bash(claude mcp list:*)",
+      "Bash(claude mcp remove:*)",
+      "Bash(claude mcp add:*)",
+      "Read(//c/Users/lh_ha/**)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(gh auth:*)",
+      "Bash(where gh:*)",
+      "Bash(powershell -c \"Get-Command gh\")",
+      "Bash(gh:*)",
+      "Bash(mkdir:*)",
+      "Bash(git mv:*)",
+      "Bash(git push)",
+      "WebSearch",
+      "WebFetch(domain:help.aliyun.com)",
+      "WebFetch(domain:platform.deepseek.com)",
+      "Bash(git rm:*)",
+      "Bash(nul)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

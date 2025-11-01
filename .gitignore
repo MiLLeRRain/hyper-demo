@@ -1,5 +1,4 @@
 # Claude Code files
-.claude/
 .claude.json
 
 # Python
@@ -56,3 +55,6 @@ config.yaml
 # Temporary files
 *.tmp
 *.bak
+
+# Developer workflow documentation (not tracked)
+.dev/
