@@ -145,27 +145,62 @@ DataFrame with columns: [timestamp, open, high, low, close, volume]
 **优先级**: Must Have
 
 **功能描述**:
-- 支持多个LLM Provider: DeepSeek, Qwen, OpenRouter
-- 统一的接口设计，可动态切换Provider
-- 自动重试和故障转移
+- 支持多个LLM模型: DeepSeek Chat, Qwen Plus, Claude等
+- 每个模型可通过不同服务提供商访问: Official API, OpenRouter等
+- 模型优先设计，服务提供商作为子选项
+- 自动故障转移（Model-level fallback）
 
-**配置示例**:
+**配置示例** (Model-Centric):
 ```yaml
 llm:
-  primary_provider: deepseek
-  fallback_provider: qwen
-  deepseek:
-    api_key: ${DEEPSEEK_API_KEY}
-    model: deepseek-chat
-  qwen:
-    api_key: ${QWEN_API_KEY}
-    model: qwen-plus
+  # 当前活跃模型
+  active_model: deepseek-chat
+
+  # 备用模型（当active_model失败时使用）
+  fallback_model: qwen-plus
+
+  # 模型定义
+  models:
+    deepseek-chat:
+      # 使用哪个服务提供商: official, openrouter
+      provider: official
+
+      official:
+        base_url: https://api.deepseek.com/v1
+        api_key: ${DEEPSEEK_API_KEY}
+        model_name: deepseek-chat
+        timeout: 30
+
+      openrouter:
+        base_url: https://openrouter.ai/api/v1
+        api_key: ${OPENROUTER_API_KEY}
+        model_name: deepseek/deepseek-chat
+        timeout: 30
+
+    qwen-plus:
+      provider: official
+
+      official:
+        base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+        api_key: ${QWEN_API_KEY}
+        model_name: qwen-plus
+        timeout: 30
+
+      openrouter:
+        base_url: https://openrouter.ai/api/v1
+        api_key: ${OPENROUTER_API_KEY}
+        model_name: qwen/qwen-2.5-72b-instruct
+        timeout: 30
+
+  max_tokens: 4096
+  temperature: 0.7
 ```
 
 **验收标准**:
-- [ ] 支持DeepSeek和Qwen
-- [ ] Provider切换无需重启系统
-- [ ] 主Provider失败时自动切换到备用Provider
+- [ ] 支持DeepSeek Chat和Qwen Plus（可通过official或OpenRouter）
+- [ ] 支持运行时切换模型的服务提供商（修改config后重启）
+- [ ] Active model失败时自动切换到fallback model
+- [ ] OpenRouter作为服务提供商正确工作
 
 ---
 

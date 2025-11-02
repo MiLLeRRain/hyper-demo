@@ -1,15 +1,50 @@
 # LLM Provider 配置指南
 
+## 架构设计: Model-Centric（模型优先）
+
+**核心理念**:
+- **先选择LLM模型** (如 deepseek-chat, qwen-plus)
+- **再选择服务提供商** (Official API 或 OpenRouter)
+- **模型级别的fallback** (active_model 失败 → fallback_model)
+
+### 为什么是Model-Centric？
+
+传统Provider-Centric设计的问题：
+```yaml
+# ❌ 错误: Provider优先
+primary_provider: deepseek
+fallback_provider: qwen
+```
+这种设计错误地认为DeepSeek和Qwen是"提供商"，但实际上：
+- **DeepSeek-Chat、Qwen-Plus是模型**
+- **Official API、OpenRouter是服务提供商**
+
+正确的Model-Centric设计：
+```yaml
+# ✅ 正确: 模型优先
+active_model: deepseek-chat        # 选择模型
+fallback_model: qwen-plus          # 备用模型
+
+models:
+  deepseek-chat:
+    provider: official             # 选择服务提供商
+    # 或 provider: openrouter
+```
+
+---
+
 ## API兼容性说明
 
 **重要发现**: DeepSeek官方、Qwen官方、OpenRouter **使用完全相同的API格式**！
 
-所有提供商都使用OpenAI兼容接口，只有以下区别：
+所有服务提供商都使用OpenAI兼容接口，只有以下区别：
 - `base_url` (API端点地址)
 - `api_key` (API密钥)
-- `model` (模型名称)
+- `model_name` (模型标识符)
 
-**这意味着切换提供商只需修改配置文件，代码完全不变！**
+**这意味着切换服务提供商只需修改配置文件，代码完全不变！**
+
+---
 
 ## 快速开始
 
@@ -20,62 +55,106 @@
 cp config.example.yaml config.yaml
 
 # 编辑配置文件，填写你的API密钥
-# 只需填写你想使用的提供商的密钥
 ```
 
-### 2. 选择提供商
+### 2. 选择模型和服务提供商
 
-在 `config.yaml` 中设置 `active_provider`:
+在 `config.yaml` 中配置：
 
 ```yaml
-# 选择以下之一:
-active_provider: 'deepseek_official'  # DeepSeek官方
-# active_provider: 'qwen_official'    # Qwen官方
-# active_provider: 'openrouter'        # OpenRouter
+llm:
+  # 选择当前使用的模型
+  active_model: 'deepseek-chat'
+
+  # 选择备用模型（当active失败时使用）
+  fallback_model: 'qwen-plus'
+
+  # 模型定义
+  models:
+    deepseek-chat:
+      # 选择服务提供商: official 或 openrouter
+      provider: 'official'
+
+      official:
+        api_key: 'YOUR_DEEPSEEK_API_KEY'
+        # ... 其他配置
+
+      openrouter:
+        api_key: 'YOUR_OPENROUTER_API_KEY'
+        # ... 其他配置
 ```
 
-### 3. 使用LLM客户端
+### 3. 使用LLM管理器
 
 ```python
-from src.llm_client import LLMClient
+from src.trading_bot.ai.llm_manager import LLMProviderManager
+from src.trading_bot.config import load_config
 
-# 初始化 (自动使用config.yaml中的active_provider)
-client = LLMClient('config.yaml')
+# 加载配置
+config = load_config('config.yaml')
 
-# 生成交易决策
-decision = client.generate_decision(nof1_prompt)
+# 初始化管理器
+llm_manager = LLMProviderManager(config.llm)
 
-# 运行时切换提供商 (可选)
-client.switch_provider('qwen_official')
+# 生成AI决策（自动使用active_model，失败时fallback）
+response = llm_manager.generate_decision(prompt)
 ```
 
-## 提供商对比
+## 模型 vs 服务提供商对比
 
-### DeepSeek 官方
+### 可用的LLM模型
+
+#### DeepSeek-Chat
+- **模型特点**: 推理能力强，适合复杂决策
+- **上下文长度**: 64K tokens
+- **官方定价**: $0.27/1M输入, $1.10/1M输出
+- **OpenRouter定价**: $0.27/1M输入, $1.10/1M输出（相同）
+- **推荐场景**: 需要深度推理的交易决策
+
+#### Qwen-Plus
+- **模型特点**: 平衡性能和成本，中文能力强
+- **上下文长度**: 32K tokens
+- **官方定价**: ¥0.0008/1K tokens (~$0.11/1M)
+- **OpenRouter定价**: $0.54/1M输入, $2.24/1M输出
+- **推荐场景**: 性价比优先
+
+---
+
+### 服务提供商对比
+
+#### Official API（官方API）
+**DeepSeek官方**:
 - **API端点**: `https://api.deepseek.com/v1`
 - **获取密钥**: https://platform.deepseek.com/
-- **定价**: $0.27/1M输入, $1.10/1M输出
-- **缓存**: 90%折扣 ($0.027/1M)
-- **优点**: 最便宜，有缓存支持
+- **优点**: 最便宜，有缓存支持（90%折扣）
 - **缺点**: 数据用于训练，存储在中国
 
-### Qwen 官方 (阿里云DashScope)
+**Qwen官方**:
 - **API端点**: `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`
 - **获取密钥**: https://help.aliyun.com/zh/dashscope/
-- **定价**:
-  - Qwen-Plus: ¥0.0008/1K tokens (~$0.11/1M)
-  - Qwen-Max: ¥0.04/1K tokens (~$5.5/1M)
 - **优点**: 中国用户访问快，价格适中
 - **缺点**: 需要阿里云账户，国际化程度较低
 
-### OpenRouter
+#### OpenRouter
 - **API端点**: `https://openrouter.ai/api/v1`
 - **获取密钥**: https://openrouter.ai/keys
-- **定价**:
-  - DeepSeek: $0.27/1M输入, $1.10/1M输出
-  - Qwen: $0.54/1M输入, $2.24/1M输出
-- **优点**: 零数据保留(ZDR)，支持400+模型，一个账户管理所有
-- **缺点**: 价格略高于官方
+- **支持模型**: DeepSeek-Chat, Qwen, Claude, GPT-4等400+模型
+- **优点**: 零数据保留(ZDR)，一个账户管理所有模型，方便切换
+- **缺点**: 部分模型价格略高于官方
+
+---
+
+### 如何选择？
+
+**选择模型**:
+1. **需要最强推理能力** → DeepSeek-Chat
+2. **注重性价比** → Qwen-Plus
+3. **需要其他模型** → 通过OpenRouter访问Claude、GPT-4等
+
+**选择服务提供商**:
+1. **成本最优** → 使用Official API
+2. **注重隐私** → 使用OpenRouter (零数据保留)
+3. **需要多模型切换** → 使用OpenRouter（一个账户管理所有）
 
 ## 隐私考虑
 
@@ -149,65 +228,111 @@ client.switch_provider('qwen_official')
 ### 基础使用
 
 ```python
-from src.llm_client import LLMClient
+from src.trading_bot.ai.llm_manager import LLMProviderManager
+from src.trading_bot.config import load_config
 
-# 方法1: 使用配置文件
-client = LLMClient('config.yaml')
-decision = client.generate_decision(prompt)
+# 加载配置
+config = load_config('config.yaml')
 
-# 方法2: 运行时切换
-client.switch_provider('qwen_official')
-decision = client.generate_decision(prompt)
+# 初始化管理器
+llm_manager = LLMProviderManager(config.llm)
+
+# 生成决策（使用active_model，失败时自动fallback）
+response = llm_manager.generate_decision(prompt)
 ```
 
-### 多模型对比
+### 切换服务提供商
+
+如果想让某个模型使用不同的服务提供商，只需修改 `config.yaml`:
+
+```yaml
+# 从官方API切换到OpenRouter
+llm:
+  models:
+    deepseek-chat:
+      provider: openrouter  # 改为 openrouter
+      # provider: official  # 之前用的official
+```
+
+重启程序即可生效，代码无需修改。
+
+### 切换模型
+
+如果想切换使用的模型，修改 `config.yaml`:
+
+```yaml
+llm:
+  active_model: qwen-plus     # 改为qwen-plus
+  # active_model: deepseek-chat  # 之前用的deepseek-chat
+```
+
+### 测试不同模型的效果
 
 ```python
-# 同时测试多个提供商的决策质量
-providers = ['deepseek_official', 'qwen_official', 'openrouter']
-decisions = {}
+# 方法1: 修改配置文件，分别测试
+# 1. 设置 active_model: deepseek-chat，运行测试
+# 2. 设置 active_model: qwen-plus，运行测试
+# 3. 对比决策质量
 
-client = LLMClient('config.yaml')
+# 方法2: 通过OpenRouter测试多个模型
+# 在config.yaml中添加更多模型定义:
+llm:
+  models:
+    claude-3-5-sonnet:
+      provider: openrouter
+      openrouter:
+        api_key: YOUR_KEY
+        model_name: anthropic/claude-3.5-sonnet
 
-for provider in providers:
-    client.switch_provider(provider)
-    decisions[provider] = client.generate_decision(prompt)
-
-# 对比不同模型的决策
-for provider, decision in decisions.items():
-    print(f"\n=== {provider} ===")
-    print(decision)
+    gpt-4o:
+      provider: openrouter
+      openrouter:
+        api_key: YOUR_KEY
+        model_name: openai/gpt-4o
 ```
 
 ### 错误处理
 
 ```python
-from src.llm_client import LLMClient
+from src.trading_bot.ai.llm_manager import LLMProviderManager
+from src.trading_bot.config import load_config
 
 try:
-    client = LLMClient('config.yaml')
-    decision = client.generate_decision(prompt)
+    config = load_config('config.yaml')
+    llm_manager = LLMProviderManager(config.llm)
+    response = llm_manager.generate_decision(prompt)
 except FileNotFoundError:
     print("请先创建 config.yaml 配置文件")
 except ValueError as e:
     print(f"配置错误: {e}")
+except RuntimeError as e:
+    # Active和fallback模型都失败
+    print(f"所有模型都失败了: {e}")
 except Exception as e:
-    print(f"API调用失败: {e}")
+    print(f"未知错误: {e}")
 ```
 
 ## 常见问题
 
-### Q: 三个提供商的响应质量一样吗？
+### Q: 同一个模型通过不同服务提供商访问，响应质量一样吗？
 A: 理论上一样（同样的模型），但实际可能因为：
 - 模型版本略有差异
 - 推理参数调优不同
 - 建议实际测试对比
 
-### Q: 可以在运行时切换提供商吗？
-A: 可以！使用 `client.switch_provider('new_provider')`
+### Q: 可以在运行时切换模型或服务提供商吗？
+A: 修改 `config.yaml` 后重启程序即可生效，代码无需修改。
 
-### Q: 需要修改代码才能切换吗？
-A: 不需要！所有提供商使用相同的API格式，只需修改 `config.yaml`
+### Q: Model-Centric和Provider-Centric有什么区别？
+A:
+- **Provider-Centric（错误）**: 把DeepSeek当成"提供商"
+- **Model-Centric（正确）**: DeepSeek-Chat是模型，Official API和OpenRouter是提供商
+
+### Q: 为什么需要fallback_model？
+A: 当active_model的API失败时（网络问题、限流等），自动切换到fallback_model继续运行。
+
+### Q: 可以配置provider级别的fallback吗？
+A: 当前设计不支持。如果需要，可以在config.yaml中同时配置official和openrouter，需要时手动切换provider字段。
 
 ### Q: 为什么隐私不是大问题？
 A: 因为你的提示词是固定模板，只有市场数据在变化。即使被训练，也不会泄露专有策略。
@@ -215,8 +340,22 @@ A: 因为你的提示词是固定模板，只有市场数据在变化。即使�
 ### Q: 缓存是什么？
 A: DeepSeek官方支持prompt缓存，重复部分只收10%费用。由于我们的提示词模板固定，缓存命中率可达90%。
 
-### Q: 推荐哪个？
+### Q: 推荐哪个组合？
 A:
-- **初学者**: OpenRouter (方便，安全)
-- **追求性价比**: Qwen-Plus官方 ($4/月)
-- **最低成本**: DeepSeek官方+缓存 ($9/月)
+- **初学者**: DeepSeek-Chat + OpenRouter (方便，安全)
+- **性价比**: Qwen-Plus + Official API ($4/月)
+- **最低成本**: DeepSeek-Chat + Official API + 缓存 ($9/月)
+- **最强性能**: Claude-3.5-Sonnet + OpenRouter (贵但效果可能更好)
+
+### Q: 如何添加新模型？
+A: 在 `config.yaml` 的 `models` 部分添加新模型定义即可：
+```yaml
+models:
+  gpt-4o:
+    provider: openrouter
+    openrouter:
+      api_key: YOUR_KEY
+      base_url: https://openrouter.ai/api/v1
+      model_name: openai/gpt-4o
+      timeout: 30
+```

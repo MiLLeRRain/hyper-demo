@@ -226,50 +226,166 @@ class PromptFormatter:
 ---
 
 #### 2.2.2 LLM Provider Manager
-**职责**: 管理多个LLM Provider，支持切换和故障转移
+**职责**: 管理LLM模型和服务提供商，支持模型级别的故障转移
+
+**设计原则**: Model-Centric（模型优先）
+- 先选择模型（如deepseek-chat, qwen-plus）
+- 每个模型可通过不同服务提供商访问（Official API, OpenRouter等）
+- 模型级别的fallback（active_model失败 → fallback_model）
 
 **核心类**:
 ```python
+from abc import ABC, abstractmethod
+from typing import Dict, Optional
+
+class BaseLLMProvider(ABC):
+    """所有服务提供商的基类"""
+
+    @abstractmethod
+    def generate(self, prompt: str, **kwargs) -> str:
+        """生成AI回复"""
+        pass
+
+class OfficialAPIProvider(BaseLLMProvider):
+    """官方API提供商（DeepSeek官方、Qwen官方等）"""
+
+    def __init__(self, api_key: str, base_url: str, model_name: str, timeout: int):
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model_name = model_name
+        self.timeout = timeout
+
+    def generate(self, prompt: str, **kwargs) -> str:
+        """通过OpenAI兼容接口调用"""
+        from openai import OpenAI
+        client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        response = client.chat.completions.create(
+            model=self.model_name,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=self.timeout,
+            **kwargs
+        )
+        return response.choices[0].message.content
+
+class OpenRouterProvider(BaseLLMProvider):
+    """OpenRouter服务提供商"""
+
+    def __init__(self, api_key: str, base_url: str, model_name: str, timeout: int):
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model_name = model_name  # e.g. "deepseek/deepseek-chat"
+        self.timeout = timeout
+
+    def generate(self, prompt: str, **kwargs) -> str:
+        """通过OpenRouter API调用"""
+        from openai import OpenAI
+        client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        response = client.chat.completions.create(
+            model=self.model_name,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=self.timeout,
+            **kwargs
+        )
+        return response.choices[0].message.content
+
 class LLMProviderManager:
+    """LLM模型和服务提供商管理器（Model-Centric设计）"""
+
     def __init__(self, config: LLMConfig):
-        self.primary = self._create_provider(config.primary_provider)
-        self.fallback = self._create_provider(config.fallback_provider)
+        self.config = config
+        self.active_model_name = config.active_model
+        self.fallback_model_name = config.fallback_model
+
+        # 创建active和fallback模型的provider实例
+        self.active_provider = self._create_provider(
+            self.active_model_name,
+            config.models[self.active_model_name]
+        )
+        self.fallback_provider = self._create_provider(
+            self.fallback_model_name,
+            config.models[self.fallback_model_name]
+        )
+
+    def _create_provider(self, model_name: str, model_config: ModelConfig) -> BaseLLMProvider:
+        """工厂方法：根据模型配置创建服务提供商实例"""
+        provider_type = model_config.provider  # 'official' or 'openrouter'
+
+        # 获取对应provider的配置
+        if provider_type == "official":
+            provider_config = model_config.official
+        elif provider_type == "openrouter":
+            provider_config = model_config.openrouter
+        else:
+            raise ValueError(f"Unknown provider type: {provider_type}")
+
+        # 创建对应的provider实例
+        if provider_type == "official":
+            return OfficialAPIProvider(
+                api_key=provider_config.api_key,
+                base_url=provider_config.base_url,
+                model_name=provider_config.model_name,
+                timeout=provider_config.timeout
+            )
+        elif provider_type == "openrouter":
+            return OpenRouterProvider(
+                api_key=provider_config.api_key,
+                base_url=provider_config.base_url,
+                model_name=provider_config.model_name,
+                timeout=provider_config.timeout
+            )
 
     def generate_decision(self, prompt: str) -> str:
-        """调用LLM生成决策"""
+        """生成AI决策，自动fallback"""
         try:
-            return self.primary.generate(prompt)
+            logger.info(f"Calling active model: {self.active_model_name}")
+            response = self.active_provider.generate(
+                prompt,
+                max_tokens=self.config.max_tokens,
+                temperature=self.config.temperature
+            )
+            return response
         except Exception as e:
-            logger.warning(f"Primary provider failed: {e}, switching to fallback")
-            return self.fallback.generate(prompt)
+            logger.warning(
+                f"Active model {self.active_model_name} failed: {e}, "
+                f"switching to fallback model {self.fallback_model_name}"
+            )
+            try:
+                response = self.fallback_provider.generate(
+                    prompt,
+                    max_tokens=self.config.max_tokens,
+                    temperature=self.config.temperature
+                )
+                return response
+            except Exception as fallback_error:
+                logger.error(f"Fallback model also failed: {fallback_error}")
+                raise RuntimeError("Both active and fallback models failed")
+```
 
-    def _create_provider(self, name: str) -> LLMProvider:
-        """工厂方法创建Provider"""
-        if name == "deepseek":
-            return DeepSeekProvider(...)
-        elif name == "qwen":
-            return QwenProvider(...)
-        elif name == "openrouter":
-            return OpenRouterProvider(...)
+**配置模型（Pydantic）**:
+```python
+from pydantic import BaseModel, Field
+from typing import Dict, Optional
 
-class LLMProvider(ABC):
-    @abstractmethod
-    def generate(self, prompt: str) -> str:
-        """生成AI回复"""
+class ProviderConfig(BaseModel):
+    """服务提供商配置"""
+    api_key: str
+    base_url: str
+    model_name: str
+    timeout: int = 30
 
-class DeepSeekProvider(LLMProvider):
-    def generate(self, prompt: str) -> str:
-        response = requests.post(
-            "https://api.deepseek.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={
-                "model": "deepseek-chat",
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 4000,
-                "temperature": 0.7
-            }
-        )
-        return response.json()["choices"][0]["message"]["content"]
+class ModelConfig(BaseModel):
+    """单个模型的配置"""
+    provider: str = Field(..., description="使用的服务提供商: official | openrouter")
+    official: Optional[ProviderConfig] = None
+    openrouter: Optional[ProviderConfig] = None
+
+class LLMConfig(BaseModel):
+    """LLM总配置"""
+    active_model: str = Field(..., description="当前活跃模型")
+    fallback_model: str = Field(..., description="备用模型")
+    models: Dict[str, ModelConfig] = Field(..., description="模型定义字典")
+    max_tokens: int = 4096
+    temperature: float = 0.7
 ```
 
 ---

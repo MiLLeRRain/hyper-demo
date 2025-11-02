@@ -1,36 +1,73 @@
-# LLM Provider Configuration
-# Switch providers by changing 'active_provider' below
+# LLM Configuration (Model-Centric Design)
+# Choose model first, then select service provider (official API or OpenRouter)
 
-# Which provider to use: 'deepseek_official' | 'qwen_official' | 'openrouter'
-active_provider: 'deepseek_official'
+llm:
+  # Currently active model
+  active_model: 'deepseek-chat'
 
-providers:
-  deepseek_official:
-    base_url: 'https://api.deepseek.com/v1'
-    api_key: 'YOUR_DEEPSEEK_API_KEY'  # Get from https://platform.deepseek.com/
-    model: 'deepseek-chat'
-    pricing:
-      input: '$0.27/1M tokens'
-      output: '$1.10/1M tokens'
-      cache: '$0.027/1M tokens (90% discount)'
+  # Fallback model if active model fails
+  fallback_model: 'qwen-plus'
 
-  qwen_official:
-    base_url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
-    api_key: 'YOUR_QWEN_API_KEY'  # Get from https://help.aliyun.com/zh/dashscope/
-    model: 'qwen-plus'
-    pricing:
-      qwen_plus: '¥0.0008/1K tokens (input+output)'
-      qwen_max: '¥0.04/1K tokens (input+output)'
+  # Model definitions - each model can use different service providers
+  models:
+    deepseek-chat:
+      # Which provider to use for this model: 'official' | 'openrouter'
+      provider: 'official'
 
-  openrouter:
-    base_url: 'https://openrouter.ai/api/v1'
-    api_key: 'YOUR_OPENROUTER_API_KEY'  # Get from https://openrouter.ai/keys
-    models:
-      deepseek: 'deepseek/deepseek-chat'
-      qwen: 'qwen/qwen-2.5-72b-instruct'
-    pricing:
-      deepseek: '$0.27/1M input, $1.10/1M output'
-      qwen: '$0.54/1M input, $2.24/1M output'
+      # Official DeepSeek API configuration
+      official:
+        base_url: 'https://api.deepseek.com/v1'
+        api_key: 'YOUR_DEEPSEEK_API_KEY'  # Get from https://platform.deepseek.com/
+        model_name: 'deepseek-chat'
+        timeout: 30
+        pricing:
+          input: '$0.27/1M tokens'
+          output: '$1.10/1M tokens'
+          cache: '$0.027/1M tokens (90% discount)'
+
+      # OpenRouter configuration (alternative provider for same model)
+      openrouter:
+        base_url: 'https://openrouter.ai/api/v1'
+        api_key: 'YOUR_OPENROUTER_API_KEY'  # Get from https://openrouter.ai/keys
+        model_name: 'deepseek/deepseek-chat'
+        timeout: 30
+        pricing:
+          input: '$0.27/1M tokens'
+          output: '$1.10/1M tokens'
+
+    qwen-plus:
+      provider: 'official'
+
+      official:
+        base_url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
+        api_key: 'YOUR_QWEN_API_KEY'  # Get from https://help.aliyun.com/zh/dashscope/
+        model_name: 'qwen-plus'
+        timeout: 30
+        pricing:
+          input_output: '¥0.0008/1K tokens'
+
+      openrouter:
+        base_url: 'https://openrouter.ai/api/v1'
+        api_key: 'YOUR_OPENROUTER_API_KEY'
+        model_name: 'qwen/qwen-2.5-72b-instruct'
+        timeout: 30
+        pricing:
+          input: '$0.54/1M tokens'
+          output: '$2.24/1M tokens'
+
+    # Example: Additional model accessible only via OpenRouter
+    claude-3-5-sonnet:
+      provider: 'openrouter'
+
+      openrouter:
+        base_url: 'https://openrouter.ai/api/v1'
+        api_key: 'YOUR_OPENROUTER_API_KEY'
+        model_name: 'anthropic/claude-3.5-sonnet'
+        timeout: 30
+
+  # Common LLM settings
+  max_tokens: 4096
+  temperature: 0.7
 
 # Trading Configuration
 trading:
