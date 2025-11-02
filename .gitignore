@@ -58,3 +58,6 @@ config.yaml
 
 # Developer workflow documentation (not tracked)
 .dev/
+
+# Nul files
+nul
