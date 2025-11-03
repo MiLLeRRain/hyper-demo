@@ -29,7 +29,8 @@
       "WebFetch(domain:help.aliyun.com)",
       "WebFetch(domain:platform.deepseek.com)",
       "Bash(git rm:*)",
-      "Bash(nul)"
+      "Bash(nul)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

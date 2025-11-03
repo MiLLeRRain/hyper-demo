@@ -1,0 +1,55 @@
+[MASTER]
+# Python version to target
+py-version=3.8
+
+# Files or directories to be skipped
+ignore=tests,venv,.venv,build,dist
+
+# Use multiple processes to speed up Pylint
+jobs=4
+
+[MESSAGES CONTROL]
+# Disable specific warnings
+disable=
+    C0111,  # missing-docstring
+    C0103,  # invalid-name
+    R0913,  # too-many-arguments
+    R0914,  # too-many-locals
+    W0511,  # fixme
+    W0212,  # protected-access (for tests)
+
+[FORMAT]
+# Maximum number of characters on a single line
+max-line-length=100
+
+# String used for indentation
+indent-string='    '
+
+[BASIC]
+# Naming conventions
+function-naming-style=snake_case
+class-naming-style=PascalCase
+const-naming-style=UPPER_CASE
+variable-naming-style=snake_case
+argument-naming-style=snake_case
+attr-naming-style=snake_case
+
+[DESIGN]
+# Maximum number of arguments for function/method
+max-args=7
+
+# Maximum number of attributes for a class
+max-attributes=10
+
+# Maximum number of public methods for a class
+max-public-methods=20
+
+[REPORTS]
+# Set the output format
+output-format=colorized
+
+# Include message's id in output
+include-ids=yes
+
+# Evaluation score threshold
+fail-under=8.0
