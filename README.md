@@ -1,5 +1,9 @@
 # HyperLiquid AI Trading Demo
 
+![Tests](https://github.com/MiLLeRRain/hyper-demo/actions/workflows/tests.yml/badge.svg)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+![Coverage](https://img.shields.io/badge/coverage-92%25-brightgreen)
+
 基于 NoF1.ai 的 AI 交易系统研究与实现方案
 
 ## 项目简介
