@@ -63,16 +63,32 @@ llm:
   max_tokens: 4096
   temperature: 0.7
 
+# HyperLiquid Configuration
+exchange:
+  testnet: true  # Use testnet for development
+  mainnet_url: 'https://api.hyperliquid.xyz'
+  testnet_url: 'https://api.hyperliquid-testnet.xyz'
+
+  # Multiple account support - each agent uses one account
+  accounts:
+    account_1:
+      account_id: '0x1234...'  # Your HyperLiquid account address
+      api_key: '${HYPERLIQUID_KEY_1}'
+      api_secret: '${HYPERLIQUID_SECRET_1}'
+
+    account_2:
+      account_id: '0x5678...'
+      api_key: '${HYPERLIQUID_KEY_2}'
+      api_secret: '${HYPERLIQUID_SECRET_2}'
+
+    # Add more accounts as needed...
+
 # Trading Configuration
 trading:
   interval_minutes: 3  # AI decision interval
   coins: ['BTC', 'ETH', 'SOL', 'BNB', 'DOGE', 'XRP']
-
-# HyperLiquid Configuration
-hyperliquid:
-  testnet: true  # Use testnet for development
-  mainnet_url: 'https://api.hyperliquid.xyz'
-  testnet_url: 'https://api.hyperliquid-testnet.xyz'
+  kline_limit_3m: 30
+  kline_limit_4h: 24
 
 # Database Configuration
 database:
@@ -88,17 +104,27 @@ database:
 # Example CLI commands:
 #
 # Create an agent:
-#   python -m trading_bot.cli agent create \
+#   bot agent create \
 #     --name "DeepSeek Agent" \
 #     --model deepseek-chat \
-#     --account 0x1234... \
-#     --api-key ${HYPERLIQUID_KEY} \
+#     --account account_1 \
+#     --balance 10000.0
+#
+# Create another agent with different model and account:
+#   bot agent create \
+#     --name "Qwen Agent" \
+#     --model qwen-plus \
+#     --account account_2 \
 #     --balance 10000.0
 #
 # List agents:
-#   python -m trading_bot.cli agent list
+#   bot agent list
 #
 # Pause an agent:
-#   python -m trading_bot.cli agent pause <agent-id>
+#   bot agent pause <agent-id>
 #
-# For testing with single agent: just create one agent in database
+# View agent performance:
+#   bot agent stats <agent-id>
+#
+# Note: Agent references model and account names defined above
+# API keys are never stored in database - they stay in config.yaml

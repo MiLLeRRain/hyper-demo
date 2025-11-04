@@ -33,10 +33,17 @@ class TradingAgent(Base):
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    llm_model: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    hyperliquid_account_id: Mapped[Optional[str]] = mapped_column(String(100))
-    hyperliquid_api_key_encrypted: Mapped[Optional[str]] = mapped_column(Text)
-    hyperliquid_api_secret_encrypted: Mapped[Optional[str]] = mapped_column(Text)
+    llm_model: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+        comment="References model name in config.llm.models"
+    )
+    exchange_account: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        comment="References account name in config.exchange.accounts"
+    )
     initial_balance: Mapped[Decimal] = mapped_column(DECIMAL(20, 2), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20),

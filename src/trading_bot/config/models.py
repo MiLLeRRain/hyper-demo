@@ -42,14 +42,26 @@ class LLMConfig(BaseModel):
     temperature: float = 0.7
 
 
+class ExchangeAccountConfig(BaseModel):
+    """Configuration for a single HyperLiquid account."""
+
+    account_id: str = Field(..., description="HyperLiquid account address")
+    api_key: str = Field(..., description="HyperLiquid API key")
+    api_secret: str = Field(..., description="HyperLiquid API secret")
+
+
 class ExchangeConfig(BaseModel):
     """HyperLiquid exchange configuration."""
 
     testnet: bool = True
     mainnet_url: str = "https://api.hyperliquid.xyz"
     testnet_url: str = "https://api.hyperliquid-testnet.xyz"
-    api_key: Optional[str] = None
-    api_secret: Optional[str] = None
+
+    # Multiple account support - agents reference account names
+    accounts: Dict[str, ExchangeAccountConfig] = Field(
+        default_factory=dict,
+        description="Available HyperLiquid accounts (referenced by agents)"
+    )
 
     @property
     def base_url(self) -> str:

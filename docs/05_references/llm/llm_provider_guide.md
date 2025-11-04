@@ -25,10 +25,10 @@ llm:
 
 **哪些agents运行？由数据库控制！**
 ```bash
-# CLI创建agents
-$ bot agent create --name "DeepSeek Trader" --model deepseek-chat --balance 10000
-$ bot agent create --name "Qwen Trader" --model qwen-plus --balance 10000
-# 现在有2个agents并行运行，使用不同的LLM模型
+# CLI创建agents（引用config中定义的account）
+$ bot agent create --name "DeepSeek Trader" --model deepseek-chat --account account_1 --balance 10000
+$ bot agent create --name "Qwen Trader" --model qwen-plus --account account_2 --balance 10000
+# 现在有2个agents并行运行，使用不同的LLM模型和账户
 ```
 
 ### Model-Centric设计
@@ -119,20 +119,18 @@ database:
 ### 3. 创建和管理Agents
 
 ```bash
-# 创建使用DeepSeek的agent
+# 创建使用DeepSeek的agent（引用config中的account_1）
 $ bot agent create \
     --name "DeepSeek Trader 1" \
     --model deepseek-chat \
-    --account 0x1234... \
-    --api-key ${HL_KEY_1} \
+    --account account_1 \
     --balance 10000.0
 
-# 创建使用Qwen的agent
+# 创建使用Qwen的agent（引用config中的account_2）
 $ bot agent create \
     --name "Qwen Trader 1" \
     --model qwen-plus \
-    --account 0x5678... \
-    --api-key ${HL_KEY_2} \
+    --account account_2 \
     --balance 10000.0
 
 # 列出所有agents
@@ -140,6 +138,9 @@ $ bot agent list
 
 # 查看agent表现
 $ bot agent stats <agent-id>
+
+# 注意: account_1, account_2 在 config.yaml 的 exchange.accounts 中定义
+# API密钥安全地存在config中，不会传入命令行或存入数据库
 ```
 
 ### 4. 使用Multi-Agent系统
@@ -347,10 +348,10 @@ llm:
 **Multi-Agent方式**: 同时运行多个agents，实时对比表现！
 
 ```bash
-# 创建多个agents使用不同模型
-$ bot agent create --name "DeepSeek Trader" --model deepseek-chat --balance 10000
-$ bot agent create --name "Qwen Trader" --model qwen-plus --balance 10000
-$ bot agent create --name "Claude Trader" --model claude-3-5-sonnet --balance 10000
+# 创建多个agents使用不同模型和账户
+$ bot agent create --name "DeepSeek Trader" --model deepseek-chat --account account_1 --balance 10000
+$ bot agent create --name "Qwen Trader" --model qwen-plus --account account_2 --balance 10000
+$ bot agent create --name "Claude Trader" --model claude-3-5-sonnet --account account_3 --balance 10000
 
 # 运行系统，3个agents并行交易
 $ bot start

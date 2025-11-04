@@ -38,10 +38,8 @@ database:
 CREATE TABLE trading_agents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) NOT NULL UNIQUE,
-    llm_model VARCHAR(50) NOT NULL,
-    hyperliquid_account_id VARCHAR(100),
-    hyperliquid_api_key_encrypted TEXT,
-    hyperliquid_api_secret_encrypted TEXT,
+    llm_model VARCHAR(50) NOT NULL COMMENT 'References model name in config.llm.models',
+    exchange_account VARCHAR(50) NOT NULL COMMENT 'References account name in config.exchange.accounts',
     initial_balance DECIMAL(20, 2) NOT NULL,
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'paused', 'stopped')),
     created_at TIMESTAMP DEFAULT NOW(),
@@ -55,22 +53,40 @@ CREATE INDEX idx_trading_agents_llm_model ON trading_agents(llm_model);
 **字段说明**:
 - `id`: Agent唯一标识（UUID）
 - `name`: Agent显示名称（如"DeepSeek Agent 1", "Qwen Pro Agent"）
-- `llm_model`: 关联的LLM模型名（必须存在于`config.llm.models`中）
-- `hyperliquid_account_id`: HyperLiquid账户地址
-- `hyperliquid_api_key_encrypted`: 加密存储的API密钥
-- `hyperliquid_api_secret_encrypted`: 加密存储的API密钥
+- `llm_model`: 引用config.yaml中定义的LLM模型名（如"deepseek-chat", "qwen-plus"）
+- `exchange_account`: 引用config.yaml中定义的交易账户名（如"account_1", "account_2"）
 - `initial_balance`: 初始资金（如10000.00）
 - `status`: 运行状态
   - `active`: 正常运行，参与决策循环
   - `paused`: 暂停，不生成新决策但保留仓位
   - `stopped`: 停止，平仓后不再运行
 
+**设计说明**:
+- ✅ API密钥不存数据库，存在config.yaml中（安全）
+- ✅ Agent只存引用名称，运行时从config获取实际凭证
+- ✅ 添加新账户：修改config.yaml，重启系统
+- ✅ 创建新agent：通过CLI，无需重启
+
 **示例数据**:
 ```sql
-INSERT INTO trading_agents (name, llm_model, hyperliquid_account_id, initial_balance, status) VALUES
-    ('DeepSeek Chat Agent', 'deepseek-chat', '0x1234...', 10000.00, 'active'),
-    ('Qwen Plus Agent', 'qwen-plus', '0x5678...', 10000.00, 'active'),
-    ('GPT-4 Turbo Agent', 'gpt-4-turbo', '0xabcd...', 5000.00, 'paused');
+INSERT INTO trading_agents (name, llm_model, exchange_account, initial_balance, status) VALUES
+    ('DeepSeek Chat Agent', 'deepseek-chat', 'account_1', 10000.00, 'active'),
+    ('Qwen Plus Agent', 'qwen-plus', 'account_2', 10000.00, 'active'),
+    ('GPT-4 Turbo Agent', 'gpt-4-turbo', 'account_1', 5000.00, 'paused');
+```
+
+**对应的config.yaml**:
+```yaml
+exchange:
+  accounts:
+    account_1:
+      account_id: "0x1234..."
+      api_key: ${HYPERLIQUID_KEY_1}
+      api_secret: ${HYPERLIQUID_SECRET_1}
+    account_2:
+      account_id: "0x5678..."
+      api_key: ${HYPERLIQUID_KEY_2}
+      api_secret: ${HYPERLIQUID_SECRET_2}
 ```
 
 ---

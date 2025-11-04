@@ -30,7 +30,14 @@
       "WebFetch(domain:platform.deepseek.com)",
       "Bash(git rm:*)",
       "Bash(nul)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(pytest:*)",
+      "Bash(pip install:*)",
+      "Bash(=2.0.0 psycopg2-binary)",
+      "Bash(=2.9.0 alembic)",
+      "Bash(=1.13.0)",
+      "Bash(pip show:*)",
+      "Bash(=2.0.0)"
     ],
     "deny": [],
     "ask": []

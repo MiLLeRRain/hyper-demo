@@ -202,19 +202,25 @@ database:
 
 **Agent管理**:
 ```bash
-# 创建agent
+# 创建agent（引用config中定义的account）
 $ bot agent create \
     --name "DeepSeek Agent 1" \
     --model deepseek-chat \
-    --account 0x1234... \
-    --api-key ${HL_KEY_1} \
+    --account account_1 \
+    --balance 10000.0
+
+# 创建另一个agent使用不同account
+$ bot agent create \
+    --name "Qwen Agent 1" \
+    --model qwen-plus \
+    --account account_2 \
     --balance 10000.0
 
 # 列出所有agents
 $ bot agent list
-ID                                   Name              Model          Status   Balance
-abc123...                           DeepSeek Agent 1  deepseek-chat  active   $10,234.50
-def456...                           Qwen Agent 1      qwen-plus      active   $9,876.30
+ID                                   Name              Model          Account    Status   Balance
+abc123...                           DeepSeek Agent 1  deepseek-chat  account_1  active   $10,234.50
+def456...                           Qwen Agent 1      qwen-plus      account_2  active   $9,876.30
 
 # 暂停agent
 $ bot agent pause abc123
@@ -693,7 +699,8 @@ logging:
 
 # 注意: 哪些agents运行由数据库管理（trading_agents表）
 # 使用CLI创建/管理agents:
-#   bot agent create --name "Agent Name" --model deepseek-chat --account 0x... --balance 10000
+#   bot agent create --name "Agent Name" --model deepseek-chat --account account_1 --balance 10000
+# account_1 引用上面 exchange.accounts 中定义的账户
 ```
 
 ---
