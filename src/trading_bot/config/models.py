@@ -1,7 +1,7 @@
 """Pydantic models for configuration."""
 
 import os
-from typing import Dict, Literal, Optional
+from typing import Dict, Optional
 from pydantic import BaseModel, Field, field_validator
 import yaml
 
@@ -31,35 +31,15 @@ class ModelConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    """LLM configuration.
+    """LLM configuration - defines available model pool.
 
-    Supports two modes:
-    - 'single': Single agent mode (uses active_model with fallback_model for failover)
-    - 'multi': Multi-agent competition mode (agents managed in database)
+    Which models to run is determined by database (trading_agents table).
+    This config only defines what models are available.
     """
 
-    mode: Literal["single", "multi"] = Field(
-        default="multi",
-        description="Running mode: 'single' for single agent, 'multi' for multi-agent competition"
-    )
-    active_model: str = Field(
-        default="deepseek-chat",
-        description="Active model (used in single mode, or as default for testing)"
-    )
-    fallback_model: str = Field(
-        default="qwen-plus",
-        description="Fallback model (used in single mode for failover)"
-    )
-    models: Dict[str, ModelConfig] = Field(..., description="Model definitions")
+    models: Dict[str, ModelConfig] = Field(..., description="Available model pool")
     max_tokens: int = 4096
     temperature: float = 0.7
-
-    @field_validator("models")
-    @classmethod
-    def validate_models(cls, v: Dict[str, ModelConfig], info) -> Dict[str, ModelConfig]:
-        # Ensure active_model and fallback_model exist in models dict
-        # Note: We can't access other fields during validation, so this will be checked in __init__
-        return v
 
 
 class ExchangeConfig(BaseModel):
@@ -109,16 +89,8 @@ class TradingBotConfig(BaseModel):
 
     def model_post_init(self, __context) -> None:
         """Validate cross-field dependencies after model initialization."""
-        # Check that active_model exists in models
-        if self.llm.active_model not in self.llm.models:
-            raise ValueError(
-                f"active_model '{self.llm.active_model}' not found in models configuration"
-            )
-        # Check that fallback_model exists in models
-        if self.llm.fallback_model not in self.llm.models:
-            raise ValueError(
-                f"fallback_model '{self.llm.fallback_model}' not found in models configuration"
-            )
+        # No validation needed - agents are managed in database
+        pass
 
 
 def load_config(config_path: str = "config.yaml") -> TradingBotConfig:

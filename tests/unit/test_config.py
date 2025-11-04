@@ -55,33 +55,11 @@ class TestConfigModels:
                 ),
             )
 
-    def test_llm_config_validates_active_model_exists(self, mock_llm_config):
-        """Test LLM config validation for active_model."""
-        # Valid config should work
-        assert mock_llm_config.active_model == "deepseek-chat"
-
-    def test_llm_config_invalid_active_model(self):
-        """Test LLM config rejects non-existent active_model."""
-        with pytest.raises(ValueError, match="active_model.*not found"):
-            TradingBotConfig(
-                llm=LLMConfig(
-                    active_model="nonexistent",
-                    fallback_model="qwen-plus",
-                    models={
-                        "qwen-plus": ModelConfig(
-                            provider="official",
-                            official=ProviderConfig(
-                                api_key="key",
-                                base_url="url",
-                                model_name="model",
-                            ),
-                        ),
-                    },
-                ),
-                exchange={"testnet": True},
-                trading={"coins": ["BTC"]},
-                risk={"max_leverage": 10},
-            )
+    def test_llm_config_has_models(self, mock_llm_config):
+        """Test LLM config contains model definitions."""
+        assert "deepseek-chat" in mock_llm_config.models
+        assert "qwen-plus" in mock_llm_config.models
+        assert len(mock_llm_config.models) == 2
 
     def test_exchange_config_base_url_testnet(self, mock_exchange_config):
         """Test exchange config returns testnet URL."""
@@ -108,8 +86,6 @@ class TestLoadConfig:
         # Create temporary config file
         config_yaml = """
 llm:
-  active_model: deepseek-chat
-  fallback_model: qwen-plus
   models:
     deepseek-chat:
       provider: official
@@ -154,7 +130,7 @@ risk:
         try:
             config = load_config(temp_path)
 
-            assert config.llm.active_model == "deepseek-chat"
+            assert "deepseek-chat" in config.llm.models
             assert config.exchange.testnet is True
             assert len(config.trading.coins) == 3
             assert config.risk.max_leverage == 10
@@ -169,8 +145,6 @@ risk:
 
         config_yaml = """
 llm:
-  active_model: deepseek-chat
-  fallback_model: qwen-plus
   models:
     deepseek-chat:
       provider: official
@@ -214,8 +188,6 @@ risk:
         """Test config loading fails with missing environment variable."""
         config_yaml = """
 llm:
-  active_model: deepseek-chat
-  fallback_model: qwen-plus
   models:
     deepseek-chat:
       provider: official

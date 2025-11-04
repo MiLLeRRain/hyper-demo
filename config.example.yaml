@@ -1,19 +1,8 @@
 # LLM Configuration (Model-Centric Design)
-# Choose model first, then select service provider (official API or OpenRouter)
+# Define available model pool - which models to run is controlled in database
 
 llm:
-  # Running mode
-  # - 'single': Single agent mode (uses active_model with fallback for failover)
-  # - 'multi': Multi-agent competition mode (agents defined in database)
-  mode: 'multi'
-
-  # Active model (used in 'single' mode, or as default for testing)
-  active_model: 'deepseek-chat'
-
-  # Fallback model (used in 'single' mode if active model fails)
-  fallback_model: 'qwen-plus'
-
-  # Model definitions - each model can use different service providers
+  # Available model pool - each model can use different service providers
   models:
     deepseek-chat:
       # Which provider to use for this model: 'official' | 'openrouter'
@@ -84,3 +73,32 @@ hyperliquid:
   testnet: true  # Use testnet for development
   mainnet_url: 'https://api.hyperliquid.xyz'
   testnet_url: 'https://api.hyperliquid-testnet.xyz'
+
+# Database Configuration
+database:
+  host: localhost
+  port: 5432
+  database: trading_bot
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
+  pool_size: 10
+  max_overflow: 20
+
+# Which LLM agents to run? Managed in database (trading_agents table)
+# Example CLI commands:
+#
+# Create an agent:
+#   python -m trading_bot.cli agent create \
+#     --name "DeepSeek Agent" \
+#     --model deepseek-chat \
+#     --account 0x1234... \
+#     --api-key ${HYPERLIQUID_KEY} \
+#     --balance 10000.0
+#
+# List agents:
+#   python -m trading_bot.cli agent list
+#
+# Pause an agent:
+#   python -m trading_bot.cli agent pause <agent-id>
+#
+# For testing with single agent: just create one agent in database

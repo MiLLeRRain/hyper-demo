@@ -51,11 +51,8 @@ def mock_risk_config():
 
 @pytest.fixture
 def mock_llm_config():
-    """Mock LLM configuration."""
+    """Mock LLM configuration - defines available model pool."""
     return LLMConfig(
-        mode="single",  # Use single-agent mode for testing
-        active_model="deepseek-chat",
-        fallback_model="qwen-plus",
         models={
             "deepseek-chat": ModelConfig(
                 provider="official",
