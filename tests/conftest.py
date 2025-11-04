@@ -53,6 +53,7 @@ def mock_risk_config():
 def mock_llm_config():
     """Mock LLM configuration."""
     return LLMConfig(
+        mode="single",  # Use single-agent mode for testing
         active_model="deepseek-chat",
         fallback_model="qwen-plus",
         models={

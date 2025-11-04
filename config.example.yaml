@@ -2,10 +2,15 @@
 # Choose model first, then select service provider (official API or OpenRouter)
 
 llm:
-  # Currently active model
+  # Running mode
+  # - 'single': Single agent mode (uses active_model with fallback for failover)
+  # - 'multi': Multi-agent competition mode (agents defined in database)
+  mode: 'multi'
+
+  # Active model (used in 'single' mode, or as default for testing)
   active_model: 'deepseek-chat'
 
-  # Fallback model if active model fails
+  # Fallback model (used in 'single' mode if active model fails)
   fallback_model: 'qwen-plus'
 
   # Model definitions - each model can use different service providers

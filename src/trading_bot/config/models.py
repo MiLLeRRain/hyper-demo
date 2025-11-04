@@ -1,7 +1,7 @@
 """Pydantic models for configuration."""
 
 import os
-from typing import Dict, Optional
+from typing import Dict, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 import yaml
 
@@ -31,10 +31,25 @@ class ModelConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    """LLM configuration."""
+    """LLM configuration.
 
-    active_model: str = Field(..., description="Currently active model name")
-    fallback_model: str = Field(..., description="Fallback model name")
+    Supports two modes:
+    - 'single': Single agent mode (uses active_model with fallback_model for failover)
+    - 'multi': Multi-agent competition mode (agents managed in database)
+    """
+
+    mode: Literal["single", "multi"] = Field(
+        default="multi",
+        description="Running mode: 'single' for single agent, 'multi' for multi-agent competition"
+    )
+    active_model: str = Field(
+        default="deepseek-chat",
+        description="Active model (used in single mode, or as default for testing)"
+    )
+    fallback_model: str = Field(
+        default="qwen-plus",
+        description="Fallback model (used in single mode for failover)"
+    )
     models: Dict[str, ModelConfig] = Field(..., description="Model definitions")
     max_tokens: int = 4096
     temperature: float = 0.7

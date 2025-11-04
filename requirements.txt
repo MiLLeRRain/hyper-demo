@@ -27,8 +27,12 @@ isort>=5.13.0
 # Logging
 coloredlogs>=15.0.0
 
+# Database (Phase 2+)
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0  # PostgreSQL driver
+alembic>=1.13.0  # Database migrations
+
 # Future dependencies (Phase 2+)
 # openai>=1.0.0  # For LLM integration
 # fastapi>=0.104.0  # For web API (Phase 5)
 # uvicorn>=0.24.0  # For web server (Phase 5)
-# sqlalchemy>=2.0.0  # For database (Phase 6)

@@ -1,22 +1,252 @@
 # 数据库设计
 
-SQLite数据库表结构设计（Phase 6可选功能 - 用于数据持久化和Web仪表盘）
+PostgreSQL数据库表结构设计
 
 ---
 
 ## 1. 数据库选择
 
-### 1.1 开发/测试环境
-- **SQLite**: 轻量级，无需独立服务，适合单机部署
+### 1.1 主数据库
+- **PostgreSQL 14+**: 生产级关系型数据库
+  - 支持并发读写
+  - JSONB字段支持
+  - UUID主键支持
+  - 事务完整性保证
+  - 适合多agent并发交易场景
 
-### 1.2 生产环境（可选）
-- **PostgreSQL**: 更强大的功能，支持并发，适合有Web界面的场景
+### 1.2 连接配置
+```yaml
+database:
+  host: localhost
+  port: 5432
+  database: trading_bot
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
+  pool_size: 10
+  max_overflow: 20
+```
 
 ---
 
-## 2. 表结构设计
+## 2. 核心表结构（Multi-Agent架构）
 
-### 2.1 conversations (AI对话历史)
+### 2.1 trading_agents (交易代理)
+
+**用途**: 存储所有trading agents的配置和状态（每个agent = 一个LLM + 一个独立HyperLiquid账户）
+
+```sql
+CREATE TABLE trading_agents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL UNIQUE,
+    llm_model VARCHAR(50) NOT NULL,
+    hyperliquid_account_id VARCHAR(100),
+    hyperliquid_api_key_encrypted TEXT,
+    hyperliquid_api_secret_encrypted TEXT,
+    initial_balance DECIMAL(20, 2) NOT NULL,
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'paused', 'stopped')),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_trading_agents_status ON trading_agents(status);
+CREATE INDEX idx_trading_agents_llm_model ON trading_agents(llm_model);
+```
+
+**字段说明**:
+- `id`: Agent唯一标识（UUID）
+- `name`: Agent显示名称（如"DeepSeek Agent 1", "Qwen Pro Agent"）
+- `llm_model`: 关联的LLM模型名（必须存在于`config.llm.models`中）
+- `hyperliquid_account_id`: HyperLiquid账户地址
+- `hyperliquid_api_key_encrypted`: 加密存储的API密钥
+- `hyperliquid_api_secret_encrypted`: 加密存储的API密钥
+- `initial_balance`: 初始资金（如10000.00）
+- `status`: 运行状态
+  - `active`: 正常运行，参与决策循环
+  - `paused`: 暂停，不生成新决策但保留仓位
+  - `stopped`: 停止，平仓后不再运行
+
+**示例数据**:
+```sql
+INSERT INTO trading_agents (name, llm_model, hyperliquid_account_id, initial_balance, status) VALUES
+    ('DeepSeek Chat Agent', 'deepseek-chat', '0x1234...', 10000.00, 'active'),
+    ('Qwen Plus Agent', 'qwen-plus', '0x5678...', 10000.00, 'active'),
+    ('GPT-4 Turbo Agent', 'gpt-4-turbo', '0xabcd...', 5000.00, 'paused');
+```
+
+---
+
+### 2.2 agent_decisions (Agent决策记录)
+
+**用途**: 存储每个agent的AI决策历史
+
+```sql
+CREATE TABLE agent_decisions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id UUID NOT NULL REFERENCES trading_agents(id) ON DELETE CASCADE,
+    timestamp TIMESTAMP DEFAULT NOW(),
+    market_data_snapshot JSONB NOT NULL,
+    llm_prompt TEXT NOT NULL,
+    llm_response TEXT NOT NULL,
+    parsed_decision JSONB,
+    execution_status VARCHAR(20) DEFAULT 'pending' CHECK (execution_status IN ('pending', 'executed', 'failed', 'skipped')),
+    execution_result JSONB,
+    error_message TEXT,
+    processing_time_ms INT
+);
+
+CREATE INDEX idx_agent_decisions_agent_id ON agent_decisions(agent_id);
+CREATE INDEX idx_agent_decisions_timestamp ON agent_decisions(timestamp DESC);
+CREATE INDEX idx_agent_decisions_status ON agent_decisions(execution_status);
+```
+
+**字段说明**:
+- `id`: 决策记录ID
+- `agent_id`: 关联的agent
+- `timestamp`: 决策生成时间
+- `market_data_snapshot`: 输入的市场数据快照（JSONB）
+- `llm_prompt`: 发送给LLM的完整提示词
+- `llm_response`: LLM返回的原始响应
+- `parsed_decision`: 解析后的决策JSON（包含coin, side, size, stop_loss等）
+- `execution_status`: 执行状态
+- `execution_result`: 执行结果（订单ID、成交价等）
+- `error_message`: 错误信息（如果失败）
+- `processing_time_ms`: LLM调用耗时（毫秒）
+
+**示例数据**:
+```sql
+INSERT INTO agent_decisions (agent_id, market_data_snapshot, llm_prompt, llm_response, parsed_decision, execution_status) VALUES (
+    'uuid-of-deepseek-agent',
+    '{"BTC": {"price": 95420.50, "ema_20": 94800, ...}, ...}'::jsonb,
+    'You are an expert crypto trader...',
+    '{"decisions": [{"coin": "BTC", "action": "long", ...}]}',
+    '{"coin": "BTC", "side": "long", "size": 0.1, "stop_loss": 94000}'::jsonb,
+    'executed'
+);
+```
+
+---
+
+### 2.3 agent_trades (Agent交易记录)
+
+**用途**: 存储每个agent的实际交易
+
+```sql
+CREATE TABLE agent_trades (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id UUID NOT NULL REFERENCES trading_agents(id) ON DELETE CASCADE,
+    decision_id UUID REFERENCES agent_decisions(id) ON DELETE SET NULL,
+    coin VARCHAR(10) NOT NULL,
+    side VARCHAR(10) NOT NULL CHECK (side IN ('long', 'short')),
+    size DECIMAL(20, 8) NOT NULL,
+    entry_price DECIMAL(20, 2),
+    entry_time TIMESTAMP,
+    exit_price DECIMAL(20, 2),
+    exit_time TIMESTAMP,
+    realized_pnl DECIMAL(20, 2),
+    unrealized_pnl DECIMAL(20, 2),
+    fees DECIMAL(20, 2),
+    status VARCHAR(20) DEFAULT 'open' CHECK (status IN ('open', 'closed', 'liquidated')),
+    hyperliquid_order_id VARCHAR(100),
+    notes TEXT
+);
+
+CREATE INDEX idx_agent_trades_agent_id ON agent_trades(agent_id);
+CREATE INDEX idx_agent_trades_status ON agent_trades(status);
+CREATE INDEX idx_agent_trades_coin ON agent_trades(coin);
+CREATE INDEX idx_agent_trades_entry_time ON agent_trades(entry_time DESC);
+```
+
+**字段说明**:
+- `id`: 交易记录ID
+- `agent_id`: 关联的agent
+- `decision_id`: 触发此交易的决策ID（可选）
+- `coin`: 交易币种
+- `side`: 多空方向
+- `size`: 仓位大小（币数量）
+- `entry_price`: 开仓价格
+- `entry_time`: 开仓时间
+- `exit_price`: 平仓价格
+- `exit_time`: 平仓时间
+- `realized_pnl`: 已实现盈亏（平仓后）
+- `unrealized_pnl`: 未实现盈亏（持仓中）
+- `fees`: 交易手续费
+- `status`: 交易状态
+- `hyperliquid_order_id`: HyperLiquid订单ID
+
+**示例数据**:
+```sql
+INSERT INTO agent_trades (agent_id, coin, side, size, entry_price, entry_time, status) VALUES
+    ('uuid-of-agent', 'BTC', 'long', 0.1, 95420.50, NOW(), 'open');
+```
+
+---
+
+### 2.4 agent_performance (Agent表现快照)
+
+**用途**: 定期记录每个agent的整体表现指标
+
+```sql
+CREATE TABLE agent_performance (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id UUID NOT NULL REFERENCES trading_agents(id) ON DELETE CASCADE,
+    snapshot_time TIMESTAMP DEFAULT NOW(),
+    total_value DECIMAL(20, 2) NOT NULL,
+    cash_balance DECIMAL(20, 2) NOT NULL,
+    position_value DECIMAL(20, 2) NOT NULL,
+    realized_pnl DECIMAL(20, 2) NOT NULL,
+    unrealized_pnl DECIMAL(20, 2) NOT NULL,
+    total_pnl DECIMAL(20, 2) NOT NULL,
+    roi_percent DECIMAL(10, 4),
+    num_trades INT DEFAULT 0,
+    num_winning_trades INT DEFAULT 0,
+    num_losing_trades INT DEFAULT 0,
+    win_rate DECIMAL(5, 2),
+    avg_win DECIMAL(20, 2),
+    avg_loss DECIMAL(20, 2),
+    profit_factor DECIMAL(10, 4),
+    sharpe_ratio DECIMAL(10, 4),
+    max_drawdown DECIMAL(10, 4),
+    max_drawdown_percent DECIMAL(5, 2)
+);
+
+CREATE INDEX idx_agent_performance_agent_id ON agent_performance(agent_id);
+CREATE INDEX idx_agent_performance_snapshot_time ON agent_performance(snapshot_time DESC);
+CREATE UNIQUE INDEX idx_agent_performance_unique ON agent_performance(agent_id, snapshot_time);
+```
+
+**字段说明**:
+- `id`: 快照ID
+- `agent_id`: 关联的agent
+- `snapshot_time`: 快照时间（每3分钟或每次决策后）
+- `total_value`: 账户总价值（现金+持仓市值）
+- `cash_balance`: 现金余额
+- `position_value`: 持仓市值
+- `realized_pnl`: 累计已实现盈亏
+- `unrealized_pnl`: 当前未实现盈亏
+- `total_pnl`: 总盈亏（realized + unrealized）
+- `roi_percent`: 投资回报率（%）
+- `num_trades`: 总交易次数
+- `num_winning_trades`: 盈利交易次数
+- `num_losing_trades`: 亏损交易次数
+- `win_rate`: 胜率（%）
+- `avg_win`: 平均盈利
+- `avg_loss`: 平均亏损
+- `profit_factor`: 盈亏比
+- `sharpe_ratio`: 夏普比率
+- `max_drawdown`: 最大回撤金额
+- `max_drawdown_percent`: 最大回撤百分比
+
+**示例数据**:
+```sql
+INSERT INTO agent_performance (agent_id, total_value, cash_balance, position_value, realized_pnl, unrealized_pnl) VALUES
+    ('uuid-of-agent', 10523.45, 5000.00, 5523.45, 123.45, 400.00);
+```
+
+---
+
+## 3. 辅助表结构
+
+### 3.1 conversations (AI对话历史)
 
 存储每次AI决策的完整对话内容
 
