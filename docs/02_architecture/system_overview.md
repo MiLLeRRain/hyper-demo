@@ -21,11 +21,11 @@ graph TB
             MC[Market Cache]
         end
 
-        subgraph "AI Layer"
-            PF[Prompt Formatter]
-            LP[LLM Provider Manager]
+        subgraph "AI Layer - Multi-Agent"
+            AM[Agent Manager]
+            MAO[Multi-Agent Orchestrator]
+            PB[Prompt Builder]
             DP[Decision Parser]
-            CH[Conversation History]
         end
 
         subgraph "Trading Layer"
@@ -48,7 +48,7 @@ graph TB
         subgraph "Infrastructure Layer"
             LOG[Logger]
             CFG[Config Manager]
-            DB[(SQLite)]
+            DB[(PostgreSQL)]
         end
     end
 
@@ -60,12 +60,19 @@ graph TB
     %% Data Flow
     DC -->|Market Data| TI
     TI -->|Indicators| MC
-    MC -->|Formatted Data| PF
-    PF -->|Prompt| LP
-    LP -->|API Call| DS
-    LP -->|API Call| QW
-    LP -->|AI Response| DP
-    DP -->|Decisions| RV
+    MC -->|Market Snapshot| MAO
+
+    %% Multi-Agent Flow
+    DB -->|Load Agents| AM
+    AM -->|Agent Configs| MAO
+    MAO -->|Build Prompts| PB
+    PB -->|Prompts| DS
+    PB -->|Prompts| QW
+    DS -->|Responses| DP
+    QW -->|Responses| DP
+    DP -->|Parsed Decisions| RV
+
+    %% Trading Flow
     RV -->|Validated| TE
     TE -->|Orders| OM
     OM -->|Execute| HL
@@ -73,25 +80,31 @@ graph TB
     PM -->|Status| RM
     RM -->|Risk Check| RV
 
+    %% Orchestration
     TC -->|Orchestrate| DC
-    TC -->|Orchestrate| LP
+    TC -->|Orchestrate| MAO
     TC -->|Orchestrate| TE
     SC -->|State| TC
 
+    %% Logging
     LOG -.->|Log| DC
-    LOG -.->|Log| LP
+    LOG -.->|Log| MAO
     LOG -.->|Log| TE
     LOG -.->|Log| RM
 
+    %% Configuration
     CFG -.->|Config| DC
-    CFG -.->|Config| LP
+    CFG -.->|Config| AM
     CFG -.->|Config| RV
 
-    DB -.->|Persist| CH
-    DB -.->|Persist| OM
-    DB -.->|Persist| PM
+    %% Database Persistence
+    DB -.->|Store| MAO
+    DB -.->|Store| OM
+    DB -.->|Store| PM
 
+    %% User Interface
     CLI -->|Commands| TC
+    CLI -->|Manage Agents| AM
     WEB -->|REST API| TC
 
     DC -->|Fetch| HL
@@ -197,53 +210,247 @@ class MarketCache:
 
 ### 2.2 AI Layer (AI决策层)
 
-#### 2.2.1 Prompt Formatter
-**职责**: 格式化市场数据为LLM提示词
+#### 2.2.1 Agent Manager
+**职责**: 管理多个trading agents，从数据库加载配置，为每个agent创建LLM provider
+
+**设计原则**:
+- 每个agent = 1个LLM模型 + 1个独立HyperLiquid账户
+- Agent配置存储在数据库（trading_agents表）
+- 支持动态启动/暂停/停止agents
+- 多个agents可使用相同或不同的LLM模型
 
 **核心类**:
 ```python
-class PromptFormatter:
-    def format(
-        self,
-        market_data: Dict[str, MarketData],
-        positions: List[Position],
-        account: AccountInfo,
-        conversation_history: List[Message]
-    ) -> str:
-        """
-        格式化为11k字符的提示词
-        参考 docs/00_research/nof1_ai_system_prompts_and_outputs.md
-        """
-        prompt = self._build_header()
-        prompt += self._build_portfolio_section(positions, account)
-        prompt += self._build_market_section(market_data)
-        prompt += self._build_constraints_section()
-        prompt += self._build_conversation_section(conversation_history)
-        prompt += self._build_task_section()
-        return prompt
+from sqlalchemy.orm import Session
+from typing import List, Dict
+from src.trading_bot.models.database import TradingAgent
+
+class AgentManager:
+    """管理所有trading agents"""
+
+    def __init__(self, db_session: Session, llm_config: LLMConfig):
+        self.db = db_session
+        self.llm_config = llm_config
+        self.agents: List[TradingAgent] = []
+        self.providers: Dict[str, BaseLLMProvider] = {}
+        self._load_active_agents()
+
+    def _load_active_agents(self):
+        """从数据库加载活跃的agents"""
+        self.agents = self.db.query(TradingAgent)\
+            .filter(TradingAgent.status == 'active')\
+            .all()
+
+        logger.info(f"Loaded {len(self.agents)} active agents")
+
+        # 为每个agent创建对应的LLM provider
+        for agent in self.agents:
+            if agent.llm_model not in self.providers:
+                self.providers[agent.llm_model] = self._create_provider(agent.llm_model)
+
+    def _create_provider(self, model_name: str) -> BaseLLMProvider:
+        """为指定模型创建LLM provider"""
+        if model_name not in self.llm_config.models:
+            raise ValueError(f"Model {model_name} not found in config")
+
+        model_config = self.llm_config.models[model_name]
+        provider_type = model_config.provider
+
+        if provider_type == "official":
+            provider_config = model_config.official
+            return OfficialAPIProvider(
+                api_key=provider_config.api_key,
+                base_url=provider_config.base_url,
+                model_name=provider_config.model_name,
+                timeout=provider_config.timeout
+            )
+        elif provider_type == "openrouter":
+            provider_config = model_config.openrouter
+            return OpenRouterProvider(
+                api_key=provider_config.api_key,
+                base_url=provider_config.base_url,
+                model_name=provider_config.model_name,
+                timeout=provider_config.timeout
+            )
+
+    def get_provider(self, agent: TradingAgent) -> BaseLLMProvider:
+        """获取agent对应的LLM provider"""
+        return self.providers[agent.llm_model]
+
+    def reload_agents(self):
+        """重新加载agents（支持运行时添加/删除agents）"""
+        self._load_active_agents()
 ```
 
 ---
 
-#### 2.2.2 LLM Provider Manager
-**职责**: 管理LLM模型和服务提供商，支持模型级别的故障转移
+#### 2.2.2 Multi-Agent Orchestrator
+**职责**: 协调多个agents的并行决策和执行
+
+**核心类**:
+```python
+import asyncio
+from typing import List, Dict
+from datetime import datetime
+
+class MultiAgentOrchestrator:
+    """多agent并行决策协调器"""
+
+    def __init__(
+        self,
+        agent_manager: AgentManager,
+        data_collector: DataCollector,
+        prompt_builder: PromptBuilder,
+        decision_parser: DecisionParser,
+        db_session: Session
+    ):
+        self.agent_manager = agent_manager
+        self.data_collector = data_collector
+        self.prompt_builder = prompt_builder
+        self.parser = decision_parser
+        self.db = db_session
+
+    async def run_decision_cycle(self) -> List[AgentDecision]:
+        """运行一次完整的多agent决策周期"""
+
+        # 1. 采集市场数据（所有agents共享）
+        logger.info("Collecting market data...")
+        market_data = self.data_collector.collect_all()
+
+        # 2. 并行调用所有agents的LLM决策
+        logger.info(f"Generating decisions for {len(self.agent_manager.agents)} agents...")
+        tasks = []
+        for agent in self.agent_manager.agents:
+            task = self._generate_agent_decision(agent, market_data)
+            tasks.append(task)
+
+        # 并行执行所有LLM调用
+        decisions = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 3. 处理结果并保存到数据库
+        saved_decisions = []
+        for agent, decision in zip(self.agent_manager.agents, decisions):
+            if isinstance(decision, Exception):
+                logger.error(f"Agent {agent.name} failed: {decision}")
+                continue
+
+            # 保存decision到数据库
+            db_decision = AgentDecision(
+                agent_id=agent.id,
+                market_data_snapshot=market_data,
+                llm_prompt=decision['prompt'],
+                llm_response=decision['response'],
+                parsed_decision=decision['parsed'],
+                created_at=datetime.utcnow()
+            )
+            self.db.add(db_decision)
+            saved_decisions.append(db_decision)
+
+        self.db.commit()
+        logger.info(f"Completed decision cycle: {len(saved_decisions)} successful decisions")
+
+        return saved_decisions
+
+    async def _generate_agent_decision(
+        self,
+        agent: TradingAgent,
+        market_data: Dict
+    ) -> Dict:
+        """为单个agent生成决策（异步）"""
+
+        # 获取agent的持仓信息
+        positions = self._get_agent_positions(agent)
+
+        # 构建prompt
+        prompt = self.prompt_builder.build(
+            market_data=market_data,
+            positions=positions,
+            agent=agent
+        )
+
+        # 调用LLM（异步）
+        provider = self.agent_manager.get_provider(agent)
+        response = await provider.generate_async(
+            prompt,
+            max_tokens=self.agent_manager.llm_config.max_tokens,
+            temperature=self.agent_manager.llm_config.temperature
+        )
+
+        # 解析决策
+        parsed = self.parser.parse(response)
+
+        return {
+            'prompt': prompt,
+            'response': response,
+            'parsed': parsed
+        }
+
+    def _get_agent_positions(self, agent: TradingAgent) -> List[Position]:
+        """获取agent的当前持仓"""
+        # TODO: 从HyperLiquid API获取agent账户的持仓
+        pass
+```
+
+---
+
+#### 2.2.3 Prompt Builder
+**职责**: 为每个agent构建个性化的LLM提示词
+
+**核心类**:
+```python
+class PromptBuilder:
+    def build(
+        self,
+        market_data: Dict[str, MarketData],
+        positions: List[Position],
+        agent: TradingAgent
+    ) -> str:
+        """
+        构建NoF1.ai风格的提示词
+        参考 docs/00_research/nof1_ai_system_prompts_and_outputs.md
+        """
+        prompt = self._build_header(agent)
+        prompt += self._build_portfolio_section(positions, agent)
+        prompt += self._build_market_section(market_data)
+        prompt += self._build_constraints_section(agent)
+        prompt += self._build_task_section()
+        return prompt
+
+    def _build_header(self, agent: TradingAgent) -> str:
+        """构建header部分（agent身份）"""
+        return f"""You are {agent.name}, an AI trading agent on HyperLiquid.
+Your account: {agent.hyperliquid_account_id}
+Your balance: ${agent.current_balance_usd:.2f}
+"""
+```
+
+---
+
+#### 2.2.4 LLM Provider (Base Classes)
+**职责**: 抽象LLM服务提供商，支持多种API
 
 **设计原则**: Model-Centric（模型优先）
-- 先选择模型（如deepseek-chat, qwen-plus）
 - 每个模型可通过不同服务提供商访问（Official API, OpenRouter等）
-- 模型级别的fallback（active_model失败 → fallback_model）
+- 支持同步和异步调用
+- 统一的接口设计
 
 **核心类**:
 ```python
 from abc import ABC, abstractmethod
 from typing import Dict, Optional
+import asyncio
 
 class BaseLLMProvider(ABC):
     """所有服务提供商的基类"""
 
     @abstractmethod
     def generate(self, prompt: str, **kwargs) -> str:
-        """生成AI回复"""
+        """生成AI回复（同步）"""
+        pass
+
+    @abstractmethod
+    async def generate_async(self, prompt: str, **kwargs) -> str:
+        """生成AI回复（异步）"""
         pass
 
 class OfficialAPIProvider(BaseLLMProvider):
@@ -256,10 +463,22 @@ class OfficialAPIProvider(BaseLLMProvider):
         self.timeout = timeout
 
     def generate(self, prompt: str, **kwargs) -> str:
-        """通过OpenAI兼容接口调用"""
+        """通过OpenAI兼容接口调用（同步）"""
         from openai import OpenAI
         client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         response = client.chat.completions.create(
+            model=self.model_name,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=self.timeout,
+            **kwargs
+        )
+        return response.choices[0].message.content
+
+    async def generate_async(self, prompt: str, **kwargs) -> str:
+        """通过OpenAI兼容接口调用（异步）"""
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
+        response = await client.chat.completions.create(
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
             timeout=self.timeout,
@@ -277,7 +496,7 @@ class OpenRouterProvider(BaseLLMProvider):
         self.timeout = timeout
 
     def generate(self, prompt: str, **kwargs) -> str:
-        """通过OpenRouter API调用"""
+        """通过OpenRouter API调用（同步）"""
         from openai import OpenAI
         client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         response = client.chat.completions.create(
@@ -288,77 +507,17 @@ class OpenRouterProvider(BaseLLMProvider):
         )
         return response.choices[0].message.content
 
-class LLMProviderManager:
-    """LLM模型和服务提供商管理器（Model-Centric设计）"""
-
-    def __init__(self, config: LLMConfig):
-        self.config = config
-        self.active_model_name = config.active_model
-        self.fallback_model_name = config.fallback_model
-
-        # 创建active和fallback模型的provider实例
-        self.active_provider = self._create_provider(
-            self.active_model_name,
-            config.models[self.active_model_name]
+    async def generate_async(self, prompt: str, **kwargs) -> str:
+        """通过OpenRouter API调用（异步）"""
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
+        response = await client.chat.completions.create(
+            model=self.model_name,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=self.timeout,
+            **kwargs
         )
-        self.fallback_provider = self._create_provider(
-            self.fallback_model_name,
-            config.models[self.fallback_model_name]
-        )
-
-    def _create_provider(self, model_name: str, model_config: ModelConfig) -> BaseLLMProvider:
-        """工厂方法：根据模型配置创建服务提供商实例"""
-        provider_type = model_config.provider  # 'official' or 'openrouter'
-
-        # 获取对应provider的配置
-        if provider_type == "official":
-            provider_config = model_config.official
-        elif provider_type == "openrouter":
-            provider_config = model_config.openrouter
-        else:
-            raise ValueError(f"Unknown provider type: {provider_type}")
-
-        # 创建对应的provider实例
-        if provider_type == "official":
-            return OfficialAPIProvider(
-                api_key=provider_config.api_key,
-                base_url=provider_config.base_url,
-                model_name=provider_config.model_name,
-                timeout=provider_config.timeout
-            )
-        elif provider_type == "openrouter":
-            return OpenRouterProvider(
-                api_key=provider_config.api_key,
-                base_url=provider_config.base_url,
-                model_name=provider_config.model_name,
-                timeout=provider_config.timeout
-            )
-
-    def generate_decision(self, prompt: str) -> str:
-        """生成AI决策，自动fallback"""
-        try:
-            logger.info(f"Calling active model: {self.active_model_name}")
-            response = self.active_provider.generate(
-                prompt,
-                max_tokens=self.config.max_tokens,
-                temperature=self.config.temperature
-            )
-            return response
-        except Exception as e:
-            logger.warning(
-                f"Active model {self.active_model_name} failed: {e}, "
-                f"switching to fallback model {self.fallback_model_name}"
-            )
-            try:
-                response = self.fallback_provider.generate(
-                    prompt,
-                    max_tokens=self.config.max_tokens,
-                    temperature=self.config.temperature
-                )
-                return response
-            except Exception as fallback_error:
-                logger.error(f"Fallback model also failed: {fallback_error}")
-                raise RuntimeError("Both active and fallback models failed")
+        return response.choices[0].message.content
 ```
 
 **配置模型（Pydantic）**:
@@ -380,17 +539,19 @@ class ModelConfig(BaseModel):
     openrouter: Optional[ProviderConfig] = None
 
 class LLMConfig(BaseModel):
-    """LLM总配置"""
-    active_model: str = Field(..., description="当前活跃模型")
-    fallback_model: str = Field(..., description="备用模型")
-    models: Dict[str, ModelConfig] = Field(..., description="模型定义字典")
+    """LLM总配置 - 定义可用模型池
+
+    哪些模型运行由数据库控制（trading_agents表）
+    此配置仅定义可用的模型
+    """
+    models: Dict[str, ModelConfig] = Field(..., description="可用模型池")
     max_tokens: int = 4096
     temperature: float = 0.7
 ```
 
 ---
 
-#### 2.2.3 Decision Parser
+#### 2.2.5 Decision Parser
 **职责**: 解析AI返回的JSON决策
 
 **核心类**:
@@ -641,95 +802,67 @@ class RiskMonitor:
 ### 2.5 Orchestration Layer (编排层)
 
 #### 2.5.1 Trading Cycle Orchestrator
-**职责**: 协调整个交易循环
+**职责**: 协调整个多agent交易循环
 
 **核心类**:
 ```python
+import asyncio
+
 class TradingCycleOrchestrator:
     def __init__(
         self,
-        data_collector: DataCollector,
-        technical_indicators: TechnicalIndicators,
-        llm_manager: LLMProviderManager,
-        prompt_formatter: PromptFormatter,
-        decision_parser: DecisionParser,
+        agent_manager: AgentManager,
+        multi_agent_orchestrator: MultiAgentOrchestrator,
         trade_executor: TradeExecutor,
         risk_monitor: RiskMonitor,
-        position_manager: PositionManager,
     ):
-        self.data_collector = data_collector
-        self.indicators = technical_indicators
-        self.llm = llm_manager
-        self.prompt_formatter = prompt_formatter
-        self.parser = decision_parser
+        self.agent_manager = agent_manager
+        self.multi_agent_orch = multi_agent_orchestrator
         self.executor = trade_executor
         self.risk_monitor = risk_monitor
-        self.position_manager = position_manager
         self.cycle_count = 0
 
-    def run_cycle(self) -> CycleResult:
-        """执行一次完整的交易循环"""
+    async def run_cycle(self) -> CycleResult:
+        """执行一次完整的多agent交易循环"""
         self.cycle_count += 1
         logger.info(f"Starting trading cycle #{self.cycle_count}")
 
         try:
-            # 1. 采集市场数据
-            market_data = self._collect_market_data()
-
-            # 2. 获取当前持仓
-            positions = self.position_manager.get_positions()
-
-            # 3. 检查风险
+            # 1. 检查全局风险
             risk_alerts = self.risk_monitor.check_all_risks()
             if risk_alerts:
                 self.risk_monitor.handle_alerts(risk_alerts)
                 return CycleResult(status="RISK_ALERT", alerts=risk_alerts)
 
-            # 4. 生成AI决策
-            prompt = self.prompt_formatter.format(market_data, positions, ...)
-            ai_response = self.llm.generate_decision(prompt)
-            decisions = self.parser.parse(ai_response)
+            # 2. 运行多agent并行决策
+            logger.info(f"Running decisions for {len(self.agent_manager.agents)} agents...")
+            agent_decisions = await self.multi_agent_orch.run_decision_cycle()
 
-            # 5. 执行交易
-            results = self.executor.execute_decisions(decisions.decisions)
+            # 3. 为每个agent执行交易
+            all_results = []
+            for decision in agent_decisions:
+                if decision.parsed_decision:
+                    results = self.executor.execute_decisions(
+                        agent=decision.agent,
+                        decisions=decision.parsed_decision['decisions']
+                    )
+                    all_results.extend(results)
 
-            logger.info(f"Cycle #{self.cycle_count} completed: {len(results)} trades executed")
-            return CycleResult(status="SUCCESS", trades=results)
+            logger.info(f"Cycle #{self.cycle_count} completed: {len(all_results)} trades executed")
+            return CycleResult(status="SUCCESS", trades=all_results)
 
         except Exception as e:
             logger.error(f"Cycle #{self.cycle_count} failed: {e}", exc_info=True)
             return CycleResult(status="ERROR", error=str(e))
 
-    def _collect_market_data(self) -> Dict[str, MarketData]:
-        """采集所有币种的市场数据"""
-        market_data = {}
-        for coin in ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP"]:
-            # 获取价格
-            price = self.data_collector.fetch_prices()[coin]
+    def start(self, interval_minutes: int = 3):
+        """启动交易循环"""
+        async def loop():
+            while True:
+                await self.run_cycle()
+                await asyncio.sleep(interval_minutes * 60)
 
-            # 获取K线
-            klines_3m = self.data_collector.fetch_klines(coin, "3m", 100)
-            klines_4h = self.data_collector.fetch_klines(coin, "4h", 100)
-
-            # 计算指标
-            indicators_3m = self.indicators.calculate_all(klines_3m)
-            indicators_4h = self.indicators.calculate_all(klines_4h)
-
-            # 获取OI和资金费率
-            oi = self.data_collector.fetch_open_interest(coin)
-            funding = self.data_collector.fetch_funding_rate(coin)
-
-            market_data[coin] = MarketData(
-                price=price,
-                klines_3m=klines_3m,
-                klines_4h=klines_4h,
-                indicators_3m=indicators_3m,
-                indicators_4h=indicators_4h,
-                open_interest=oi,
-                funding_rate=funding
-            )
-
-        return market_data
+        asyncio.run(loop())
 ```
 
 ---
@@ -886,58 +1019,72 @@ class ConfigManager:
 
 ---
 
-#### 2.6.3 Database (SQLite)
-**职责**: 数据持久化
+#### 2.6.3 Database (PostgreSQL)
+**职责**: 数据持久化，支持多agent系统
 
 **表设计**:
 ```sql
--- conversations: AI对话历史
-CREATE TABLE conversations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp DATETIME NOT NULL,
-    prompt TEXT NOT NULL,
-    response TEXT NOT NULL,
-    decisions JSON,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+-- trading_agents: Agent配置（每个agent = 1个LLM + 1个账户）
+CREATE TABLE trading_agents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL UNIQUE,
+    llm_model VARCHAR(50) NOT NULL,  -- 引用LLMConfig中的模型名
+    hyperliquid_account_id VARCHAR(100),
+    hyperliquid_api_key_encrypted TEXT,
+    initial_balance_usd DECIMAL(20, 2) NOT NULL,
+    current_balance_usd DECIMAL(20, 2),
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'paused', 'stopped')),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    INDEX idx_status (status),
+    INDEX idx_llm_model (llm_model)
 );
 
--- orders: 订单历史
-CREATE TABLE orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id TEXT UNIQUE NOT NULL,
-    coin TEXT NOT NULL,
-    side TEXT NOT NULL,
-    order_type TEXT NOT NULL,
-    size REAL NOT NULL,
-    price REAL,
-    status TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    filled_at DATETIME
+-- agent_decisions: AI决策历史
+CREATE TABLE agent_decisions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id UUID NOT NULL REFERENCES trading_agents(id) ON DELETE CASCADE,
+    market_data_snapshot JSONB NOT NULL,  -- 市场数据快照
+    llm_prompt TEXT NOT NULL,
+    llm_response TEXT NOT NULL,
+    parsed_decision JSONB,  -- 解析后的决策
+    created_at TIMESTAMP DEFAULT NOW(),
+    INDEX idx_agent_created (agent_id, created_at DESC)
 );
 
--- positions: 持仓历史
-CREATE TABLE positions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    coin TEXT NOT NULL,
-    side TEXT NOT NULL,
-    entry_price REAL NOT NULL,
-    exit_price REAL,
-    size REAL NOT NULL,
-    realized_pnl REAL,
-    opened_at DATETIME NOT NULL,
-    closed_at DATETIME
+-- agent_trades: 交易执行记录
+CREATE TABLE agent_trades (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id UUID NOT NULL REFERENCES trading_agents(id) ON DELETE CASCADE,
+    decision_id UUID REFERENCES agent_decisions(id),
+    coin VARCHAR(10) NOT NULL,
+    action VARCHAR(20) NOT NULL,
+    order_id VARCHAR(100),
+    size DECIMAL(20, 8),
+    entry_price DECIMAL(20, 8),
+    exit_price DECIMAL(20, 8),
+    realized_pnl_usd DECIMAL(20, 2),
+    status VARCHAR(20) NOT NULL,
+    executed_at TIMESTAMP DEFAULT NOW(),
+    INDEX idx_agent_executed (agent_id, executed_at DESC)
 );
 
--- risk_events: 风险事件
-CREATE TABLE risk_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_type TEXT NOT NULL,
-    severity TEXT NOT NULL,
-    message TEXT NOT NULL,
-    action_taken TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+-- agent_performance: 性能快照
+CREATE TABLE agent_performance (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id UUID NOT NULL REFERENCES trading_agents(id) ON DELETE CASCADE,
+    balance_usd DECIMAL(20, 2) NOT NULL,
+    total_pnl_usd DECIMAL(20, 2),
+    total_trades INTEGER,
+    win_rate DECIMAL(5, 4),
+    sharpe_ratio DECIMAL(10, 4),
+    max_drawdown_pct DECIMAL(5, 4),
+    snapshot_at TIMESTAMP DEFAULT NOW(),
+    INDEX idx_agent_snapshot (agent_id, snapshot_at DESC)
 );
 ```
+
+**SQLAlchemy模型**: 见 `src/trading_bot/models/database.py`
 
 ---
 
@@ -1006,7 +1153,10 @@ hyper-demo/
 │   └── trading_bot/
 │       ├── __init__.py
 │       ├── main.py                    # 入口
-│       ├── config.py                  # 配置管理
+│       │
+│       ├── config/                    # 配置模块
+│       │   ├── __init__.py
+│       │   └── models.py              # Pydantic配置模型
 │       │
 │       ├── data/                      # 数据层
 │       │   ├── __init__.py
@@ -1014,12 +1164,13 @@ hyper-demo/
 │       │   ├── indicators.py          # TechnicalIndicators
 │       │   └── cache.py               # MarketCache
 │       │
-│       ├── ai/                        # AI层
+│       ├── ai/                        # AI层 - Multi-Agent
 │       │   ├── __init__.py
-│       │   ├── formatter.py           # PromptFormatter
-│       │   ├── providers.py           # LLM Providers
-│       │   ├── parser.py              # DecisionParser
-│       │   └── history.py             # ConversationHistory
+│       │   ├── agent_manager.py       # AgentManager
+│       │   ├── multi_agent_orch.py    # MultiAgentOrchestrator
+│       │   ├── prompt_builder.py      # PromptBuilder
+│       │   ├── providers.py           # LLM Providers (Base, Official, OpenRouter)
+│       │   └── parser.py              # DecisionParser
 │       │
 │       ├── trading/                   # 交易层
 │       │   ├── __init__.py
@@ -1040,23 +1191,29 @@ hyper-demo/
 │       ├── infrastructure/            # 基础设施
 │       │   ├── __init__.py
 │       │   ├── logger.py              # Logger setup
-│       │   └── database.py            # Database
+│       │   └── db.py                  # Database connection
 │       │
 │       ├── cli/                       # CLI工具
 │       │   ├── __init__.py
-│       │   └── commands.py            # Click commands
+│       │   ├── commands.py            # Click commands
+│       │   └── agent_cmds.py          # Agent management commands
 │       │
 │       └── models/                    # 数据模型
 │           ├── __init__.py
-│           ├── market.py              # MarketData, Price, etc.
+│           ├── market_data.py         # MarketData, Price, etc.
 │           ├── decision.py            # Decision, AIDecisions
 │           ├── order.py               # Order, Position
-│           └── risk.py                # RiskAlert, etc.
+│           ├── risk.py                # RiskAlert, etc.
+│           └── database.py            # SQLAlchemy ORM models
 │
 ├── tests/                             # 测试
 │   ├── unit/
 │   ├── integration/
 │   └── e2e/
+│
+├── alembic/                           # 数据库迁移
+│   ├── versions/
+│   └── env.py
 │
 ├── config.yaml                        # 配置文件
 ├── .env.example                       # 环境变量示例
@@ -1072,13 +1229,13 @@ hyper-demo/
 ### 5.1 开发环境
 - 本地运行
 - HyperLiquid测试网
-- SQLite数据库
+- PostgreSQL 14+ (Docker或本地安装)
 
 ### 5.2 生产环境
 - VPS (如Vultr, DigitalOcean)
 - Ubuntu 22.04 LTS
 - Systemd service管理
-- PostgreSQL (可选)
+- PostgreSQL 14+ (托管或自建)
 - Nginx反向代理 (如果有Web界面)
 
 **Systemd配置示例**:

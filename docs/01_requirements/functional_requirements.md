@@ -145,21 +145,17 @@ DataFrame with columns: [timestamp, open, high, low, close, volume]
 **优先级**: Must Have
 
 **功能描述**:
-- 支持多个LLM模型: DeepSeek Chat, Qwen Plus, Claude等
+- 支持多个trading agents并行运行，每个agent使用独立的LLM模型
+- 每个agent = 1个LLM模型 + 1个独立HyperLiquid账户
+- Agent配置存储在PostgreSQL数据库
+- 支持动态添加/删除agents（通过CLI或API）
+- 多个LLM模型可选: DeepSeek Chat, Qwen Plus, Claude等
 - 每个模型可通过不同服务提供商访问: Official API, OpenRouter等
-- 模型优先设计，服务提供商作为子选项
-- 自动故障转移（Model-level fallback）
 
-**配置示例** (Model-Centric):
+**配置示例** (Model Pool):
 ```yaml
 llm:
-  # 当前活跃模型
-  active_model: deepseek-chat
-
-  # 备用模型（当active_model失败时使用）
-  fallback_model: qwen-plus
-
-  # 模型定义
+  # 定义可用模型池（哪些models运行由数据库控制）
   models:
     deepseek-chat:
       # 使用哪个服务提供商: official, openrouter
@@ -194,13 +190,45 @@ llm:
 
   max_tokens: 4096
   temperature: 0.7
+
+# 数据库配置
+database:
+  host: localhost
+  port: 5432
+  database: trading_bot
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
+```
+
+**Agent管理**:
+```bash
+# 创建agent
+$ bot agent create \
+    --name "DeepSeek Agent 1" \
+    --model deepseek-chat \
+    --account 0x1234... \
+    --api-key ${HL_KEY_1} \
+    --balance 10000.0
+
+# 列出所有agents
+$ bot agent list
+ID                                   Name              Model          Status   Balance
+abc123...                           DeepSeek Agent 1  deepseek-chat  active   $10,234.50
+def456...                           Qwen Agent 1      qwen-plus      active   $9,876.30
+
+# 暂停agent
+$ bot agent pause abc123
+
+# 查看agent表现
+$ bot agent stats abc123
 ```
 
 **验收标准**:
 - [ ] 支持DeepSeek Chat和Qwen Plus（可通过official或OpenRouter）
-- [ ] 支持运行时切换模型的服务提供商（修改config后重启）
-- [ ] Active model失败时自动切换到fallback model
-- [ ] OpenRouter作为服务提供商正确工作
+- [ ] 支持多个agents并行运行（数据库驱动）
+- [ ] 每个agent独立决策，互不影响
+- [ ] Agent配置存储在PostgreSQL数据库
+- [ ] CLI支持完整的agent CRUD操作
 
 ---
 
@@ -529,21 +557,33 @@ Output:
   Status: Running
   Uptime: 2 days 5 hours
   Last cycle: 2025-11-02 12:34:56
+  Active agents: 3
   Total trades: 142
   Win rate: 58.45%
   Total PnL: +12.34%
 
-# 查看当前持仓
+# Agent管理
+$ bot agent list                  # 列出所有agents
+$ bot agent create [options]      # 创建新agent
+$ bot agent pause <agent-id>      # 暂停agent
+$ bot agent resume <agent-id>     # 恢复agent
+$ bot agent stop <agent-id>       # 停止agent
+$ bot agent stats <agent-id>      # 查看agent统计
+
+# 查看当前持仓（所有agents）
 $ bot positions
 Output:
-  BTC LONG: +2.34% ($1,000)
-  ETH SHORT: -1.23% ($500)
+  Agent: DeepSeek Agent 1
+    BTC LONG: +2.34% ($1,000)
+  Agent: Qwen Agent 1
+    ETH SHORT: -1.23% ($500)
 
 # 查看交易历史
 $ bot history --limit 10
+$ bot history --agent <agent-id>  # 查看特定agent的历史
 
 # 查看/修改配置
-$ bot config get llm.provider
+$ bot config get llm.models
 $ bot config set risk.max_leverage 8
 ```
 
@@ -593,30 +633,48 @@ $ bot config set risk.max_leverage 8
 ```yaml
 # config.yaml
 
+# LLM配置 - 定义可用模型池
+llm:
+  models:
+    deepseek-chat:
+      provider: official
+      official:
+        api_key: ${DEEPSEEK_API_KEY}
+        base_url: https://api.deepseek.com/v1
+        model_name: deepseek-chat
+        timeout: 30
+    qwen-plus:
+      provider: official
+      official:
+        api_key: ${QWEN_API_KEY}
+        base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+        model_name: qwen-plus
+        timeout: 30
+  max_tokens: 4096
+  temperature: 0.7
+
 # 交易所配置
 exchange:
-  name: hyperliquid
-  api_key: ${HYPERLIQUID_API_KEY}
-  api_secret: ${HYPERLIQUID_SECRET}
   testnet: true  # 测试网模式
+  mainnet_url: https://api.hyperliquid.xyz
+  testnet_url: https://api.hyperliquid-testnet.xyz
 
-# LLM配置
-llm:
-  primary_provider: deepseek
-  fallback_provider: qwen
-  deepseek:
-    api_key: ${DEEPSEEK_API_KEY}
-    model: deepseek-chat
-    max_tokens: 4000
-  qwen:
-    api_key: ${QWEN_API_KEY}
-    model: qwen-plus
+# 数据库配置
+database:
+  host: localhost
+  port: 5432
+  database: trading_bot
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
+  pool_size: 10
+  max_overflow: 20
 
 # 交易配置
 trading:
+  interval_minutes: 3  # AI决策间隔
   coins: ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP"]
-  cycle_interval_minutes: 3
-  enable_auto_trading: true
+  kline_limit_3m: 30
+  kline_limit_4h: 24
 
 # 风险管理
 risk:
@@ -632,6 +690,10 @@ logging:
   file: logs/bot_{time}.log
   rotation: "100 MB"
   retention: "30 days"
+
+# 注意: 哪些agents运行由数据库管理（trading_agents表）
+# 使用CLI创建/管理agents:
+#   bot agent create --name "Agent Name" --model deepseek-chat --account 0x... --balance 10000
 ```
 
 ---

@@ -1,34 +1,49 @@
 # LLM Provider 配置指南
 
-## 架构设计: Model-Centric（模型优先）
+## 架构设计: Multi-Agent + Model Pool（多Agent + 模型池）
 
 **核心理念**:
-- **先选择LLM模型** (如 deepseek-chat, qwen-plus)
-- **再选择服务提供商** (Official API 或 OpenRouter)
-- **模型级别的fallback** (active_model 失败 → fallback_model)
+- **定义可用模型池**: 在配置文件中定义所有可用的LLM模型
+- **数据库驱动agents**: 通过数据库控制哪些models实际运行
+- **每个agent = 1个LLM + 1个账户**: 支持多个agents并行竞争
+- **模型优先设计**: 每个模型可通过不同服务提供商访问
 
-### 为什么是Model-Centric？
+### 为什么是Multi-Agent架构？
 
-传统Provider-Centric设计的问题：
+**NoF1.ai启发**: 让不同LLM模型竞争，看谁表现更好！
+
 ```yaml
-# ❌ 错误: Provider优先
-primary_provider: deepseek
-fallback_provider: qwen
+# ✅ 正确: 模型池 + 数据库驱动
+llm:
+  models:
+    deepseek-chat:
+      provider: official  # 选择服务提供商
+    qwen-plus:
+      provider: official
+    # ... 更多模型
 ```
-这种设计错误地认为DeepSeek和Qwen是"提供商"，但实际上：
+
+**哪些agents运行？由数据库控制！**
+```bash
+# CLI创建agents
+$ bot agent create --name "DeepSeek Trader" --model deepseek-chat --balance 10000
+$ bot agent create --name "Qwen Trader" --model qwen-plus --balance 10000
+# 现在有2个agents并行运行，使用不同的LLM模型
+```
+
+### Model-Centric设计
+
+虽然是多agent架构，但仍然遵循Model-Centric原则：
 - **DeepSeek-Chat、Qwen-Plus是模型**
 - **Official API、OpenRouter是服务提供商**
 
-正确的Model-Centric设计：
+每个模型可通过不同提供商访问：
 ```yaml
-# ✅ 正确: 模型优先
-active_model: deepseek-chat        # 选择模型
-fallback_model: qwen-plus          # 备用模型
-
 models:
   deepseek-chat:
-    provider: official             # 选择服务提供商
-    # 或 provider: openrouter
+    provider: official      # 或 openrouter
+    official: {...}
+    openrouter: {...}
 ```
 
 ---
@@ -57,19 +72,13 @@ cp config.example.yaml config.yaml
 # 编辑配置文件，填写你的API密钥
 ```
 
-### 2. 选择模型和服务提供商
+### 2. 定义可用模型池
 
 在 `config.yaml` 中配置：
 
 ```yaml
 llm:
-  # 选择当前使用的模型
-  active_model: 'deepseek-chat'
-
-  # 选择备用模型（当active失败时使用）
-  fallback_model: 'qwen-plus'
-
-  # 模型定义
+  # 定义可用模型池（哪些agents运行由数据库控制）
   models:
     deepseek-chat:
       # 选择服务提供商: official 或 openrouter
@@ -77,27 +86,87 @@ llm:
 
       official:
         api_key: 'YOUR_DEEPSEEK_API_KEY'
-        # ... 其他配置
+        base_url: https://api.deepseek.com/v1
+        model_name: deepseek-chat
+        timeout: 30
 
       openrouter:
         api_key: 'YOUR_OPENROUTER_API_KEY'
-        # ... 其他配置
+        base_url: https://openrouter.ai/api/v1
+        model_name: deepseek/deepseek-chat
+        timeout: 30
+
+    qwen-plus:
+      provider: 'official'
+      official:
+        api_key: 'YOUR_QWEN_API_KEY'
+        base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+        model_name: qwen-plus
+        timeout: 30
+
+  max_tokens: 4096
+  temperature: 0.7
+
+# 数据库配置
+database:
+  host: localhost
+  port: 5432
+  database: trading_bot
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
 ```
 
-### 3. 使用LLM管理器
+### 3. 创建和管理Agents
+
+```bash
+# 创建使用DeepSeek的agent
+$ bot agent create \
+    --name "DeepSeek Trader 1" \
+    --model deepseek-chat \
+    --account 0x1234... \
+    --api-key ${HL_KEY_1} \
+    --balance 10000.0
+
+# 创建使用Qwen的agent
+$ bot agent create \
+    --name "Qwen Trader 1" \
+    --model qwen-plus \
+    --account 0x5678... \
+    --api-key ${HL_KEY_2} \
+    --balance 10000.0
+
+# 列出所有agents
+$ bot agent list
+
+# 查看agent表现
+$ bot agent stats <agent-id>
+```
+
+### 4. 使用Multi-Agent系统
 
 ```python
-from src.trading_bot.ai.llm_manager import LLMProviderManager
+from src.trading_bot.ai.agent_manager import AgentManager
+from src.trading_bot.ai.multi_agent_orch import MultiAgentOrchestrator
 from src.trading_bot.config import load_config
+from sqlalchemy.orm import Session
 
 # 加载配置
 config = load_config('config.yaml')
 
-# 初始化管理器
-llm_manager = LLMProviderManager(config.llm)
+# 初始化agent管理器
+agent_manager = AgentManager(db_session, config.llm)
 
-# 生成AI决策（自动使用active_model，失败时fallback）
-response = llm_manager.generate_decision(prompt)
+# 初始化多agent协调器
+orchestrator = MultiAgentOrchestrator(
+    agent_manager=agent_manager,
+    data_collector=data_collector,
+    prompt_builder=prompt_builder,
+    decision_parser=decision_parser,
+    db_session=db_session
+)
+
+# 运行一次决策周期（所有agents并行）
+decisions = await orchestrator.run_decision_cycle()
 ```
 
 ## 模型 vs 服务提供商对比
@@ -225,20 +294,37 @@ response = llm_manager.generate_decision(prompt)
 
 ## 代码示例
 
-### 基础使用
+### 基础使用 - Multi-Agent
 
 ```python
-from src.trading_bot.ai.llm_manager import LLMProviderManager
+from src.trading_bot.ai.agent_manager import AgentManager
+from src.trading_bot.ai.multi_agent_orch import MultiAgentOrchestrator
 from src.trading_bot.config import load_config
+import asyncio
 
 # 加载配置
 config = load_config('config.yaml')
 
-# 初始化管理器
-llm_manager = LLMProviderManager(config.llm)
+# 初始化agent管理器（从数据库加载所有active agents）
+agent_manager = AgentManager(db_session, config.llm)
 
-# 生成决策（使用active_model，失败时自动fallback）
-response = llm_manager.generate_decision(prompt)
+# 初始化协调器
+orchestrator = MultiAgentOrchestrator(
+    agent_manager=agent_manager,
+    data_collector=data_collector,
+    prompt_builder=prompt_builder,
+    decision_parser=decision_parser,
+    db_session=db_session
+)
+
+# 运行决策周期（所有agents并行）
+decisions = asyncio.run(orchestrator.run_decision_cycle())
+
+# decisions = List[AgentDecision]，每个agent一个决策
+for decision in decisions:
+    print(f"Agent: {decision.agent.name}")
+    print(f"Model: {decision.agent.llm_model}")
+    print(f"Decision: {decision.parsed_decision}")
 ```
 
 ### 切换服务提供商
@@ -256,25 +342,27 @@ llm:
 
 重启程序即可生效，代码无需修改。
 
-### 切换模型
-
-如果想切换使用的模型，修改 `config.yaml`:
-
-```yaml
-llm:
-  active_model: qwen-plus     # 改为qwen-plus
-  # active_model: deepseek-chat  # 之前用的deepseek-chat
-```
-
 ### 测试不同模型的效果
 
-```python
-# 方法1: 修改配置文件，分别测试
-# 1. 设置 active_model: deepseek-chat，运行测试
-# 2. 设置 active_model: qwen-plus，运行测试
-# 3. 对比决策质量
+**Multi-Agent方式**: 同时运行多个agents，实时对比表现！
 
-# 方法2: 通过OpenRouter测试多个模型
+```bash
+# 创建多个agents使用不同模型
+$ bot agent create --name "DeepSeek Trader" --model deepseek-chat --balance 10000
+$ bot agent create --name "Qwen Trader" --model qwen-plus --balance 10000
+$ bot agent create --name "Claude Trader" --model claude-3-5-sonnet --balance 10000
+
+# 运行系统，3个agents并行交易
+$ bot start
+
+# 一段时间后，对比表现
+$ bot agent stats abc123  # DeepSeek
+$ bot agent stats def456  # Qwen
+$ bot agent stats ghi789  # Claude
+```
+
+**添加更多模型到池**:
+```yaml
 # 在config.yaml中添加更多模型定义:
 llm:
   models:
@@ -282,34 +370,41 @@ llm:
       provider: openrouter
       openrouter:
         api_key: YOUR_KEY
+        base_url: https://openrouter.ai/api/v1
         model_name: anthropic/claude-3.5-sonnet
+        timeout: 30
 
     gpt-4o:
       provider: openrouter
       openrouter:
         api_key: YOUR_KEY
+        base_url: https://openrouter.ai/api/v1
         model_name: openai/gpt-4o
+        timeout: 30
 ```
 
 ### 错误处理
 
 ```python
-from src.trading_bot.ai.llm_manager import LLMProviderManager
+from src.trading_bot.ai.agent_manager import AgentManager
 from src.trading_bot.config import load_config
+import asyncio
 
 try:
     config = load_config('config.yaml')
-    llm_manager = LLMProviderManager(config.llm)
-    response = llm_manager.generate_decision(prompt)
+    agent_manager = AgentManager(db_session, config.llm)
+
+    if len(agent_manager.agents) == 0:
+        print("没有活跃的agents！使用 'bot agent create' 创建agent")
+    else:
+        decisions = asyncio.run(orchestrator.run_decision_cycle())
+
 except FileNotFoundError:
     print("请先创建 config.yaml 配置文件")
 except ValueError as e:
     print(f"配置错误: {e}")
-except RuntimeError as e:
-    # Active和fallback模型都失败
-    print(f"所有模型都失败了: {e}")
 except Exception as e:
-    print(f"未知错误: {e}")
+    print(f"错误: {e}")
 ```
 
 ## 常见问题
@@ -320,19 +415,35 @@ A: 理论上一样（同样的模型），但实际可能因为：
 - 推理参数调优不同
 - 建议实际测试对比
 
-### Q: 可以在运行时切换模型或服务提供商吗？
-A: 修改 `config.yaml` 后重启程序即可生效，代码无需修改。
+### Q: 可以在运行时添加/删除agents吗？
+A: 可以！使用CLI命令：
+```bash
+$ bot agent create ...    # 添加新agent
+$ bot agent pause <id>    # 暂停agent
+$ bot agent stop <id>     # 停止agent
+```
+系统会在下一个决策周期自动识别变化。
 
 ### Q: Model-Centric和Provider-Centric有什么区别？
 A:
 - **Provider-Centric（错误）**: 把DeepSeek当成"提供商"
 - **Model-Centric（正确）**: DeepSeek-Chat是模型，Official API和OpenRouter是提供商
 
-### Q: 为什么需要fallback_model？
-A: 当active_model的API失败时（网络问题、限流等），自动切换到fallback_model继续运行。
+### Q: 多个agents会互相影响吗？
+A: 不会！每个agent使用独立的：
+- LLM模型实例
+- HyperLiquid账户
+- 决策历史
+- 交易记录
 
-### Q: 可以配置provider级别的fallback吗？
-A: 当前设计不支持。如果需要，可以在config.yaml中同时配置official和openrouter，需要时手动切换provider字段。
+它们完全独立竞争。
+
+### Q: 如何对比不同模型的表现？
+A: 创建多个agents使用不同模型，运行一段时间后使用 `bot agent stats` 对比：
+- 总盈亏 (PnL)
+- 胜率 (Win Rate)
+- 夏普比率 (Sharpe Ratio)
+- 最大回撤 (Max Drawdown)
 
 ### Q: 为什么隐私不是大问题？
 A: 因为你的提示词是固定模板，只有市场数据在变化。即使被训练，也不会泄露专有策略。
