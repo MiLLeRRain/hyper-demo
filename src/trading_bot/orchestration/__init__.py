@@ -1,1 +1,5 @@
-"""Orchestration module (Phase 4)."""
+"""Orchestration module - Multi-agent coordination."""
+
+from .multi_agent_orchestrator import MultiAgentOrchestrator
+
+__all__ = ["MultiAgentOrchestrator"]
