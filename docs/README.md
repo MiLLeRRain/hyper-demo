@@ -62,7 +62,8 @@ docs/
 
 测试计划和测试用例
 
-- **test_plan.md**: 测试计划 (TODO)
+- **test_plan.md**: 测试计划
+- **integration_test_setup_guide.md**: HyperLiquid 测试网集成测试准备指南 ⭐ NEW
 - **test_cases.md**: 测试用例 (TODO)
 - **acceptance_tests.md**: 验收测试场景 (TODO)
 
