@@ -1,6 +1,6 @@
 """Data models for the trading bot."""
 
-from .market_data import Price, Kline, MarketData, AccountInfo
+from .market_data import Price, Kline, MarketData, Position, AccountInfo
 from .database import (
     Base,
     TradingAgent,
@@ -14,6 +14,7 @@ __all__ = [
     "Price",
     "Kline",
     "MarketData",
+    "Position",
     "AccountInfo",
     # Database models
     "Base",

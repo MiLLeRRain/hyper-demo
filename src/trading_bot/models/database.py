@@ -9,6 +9,7 @@ from sqlalchemy import (
     DECIMAL,
     CheckConstraint,
     DateTime,
+    ForeignKey,
     Integer,
     String,
     Text,
@@ -45,6 +46,37 @@ class TradingAgent(Base):
         comment="References account name in config.exchange.accounts"
     )
     initial_balance: Mapped[Decimal] = mapped_column(DECIMAL(20, 2), nullable=False)
+
+    # Risk management parameters
+    max_position_size: Mapped[Decimal] = mapped_column(
+        DECIMAL(5, 2),
+        default=20.0,
+        nullable=False,
+        comment="Max position size as % of account value"
+    )
+    max_leverage: Mapped[int] = mapped_column(
+        Integer,
+        default=10,
+        nullable=False,
+        comment="Maximum allowed leverage (1-50x)"
+    )
+    stop_loss_pct: Mapped[Decimal] = mapped_column(
+        DECIMAL(5, 2),
+        default=2.0,
+        nullable=False,
+        comment="Stop loss percentage"
+    )
+    take_profit_pct: Mapped[Decimal] = mapped_column(
+        DECIMAL(5, 2),
+        default=5.0,
+        nullable=False,
+        comment="Take profit percentage"
+    )
+    strategy_description: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment="Description of trading strategy for this agent"
+    )
+
     status: Mapped[str] = mapped_column(
         String(20),
         default="active",
@@ -81,7 +113,11 @@ class TradingAgent(Base):
 
 
 class AgentDecision(Base):
-    """Agent decision model - stores AI decision history."""
+    """Agent decision model - stores AI decision history.
+
+    This model stores decisions from the multi-agent trading system.
+    Each decision represents one LLM's analysis and recommended action.
+    """
 
     __tablename__ = "agent_decisions"
 
@@ -89,21 +125,67 @@ class AgentDecision(Base):
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
     agent_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
+        PG_UUID(as_uuid=True), ForeignKey("trading_agents.id"), nullable=False, index=True
     )
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
-    market_data_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    llm_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    llm_response: Mapped[str] = mapped_column(Text, nullable=False)
-    parsed_decision: Mapped[Optional[dict]] = mapped_column(JSONB)
-    execution_status: Mapped[str] = mapped_column(
-        String(20), default="pending", nullable=False, index=True
+
+    # Decision parsing status
+    status: Mapped[str] = mapped_column(
+        String(20), default="success", nullable=False, index=True,
+        comment="success, failed, or parsing_error"
     )
-    execution_result: Mapped[Optional[dict]] = mapped_column(JSONB)
-    error_message: Mapped[Optional[str]] = mapped_column(Text)
-    processing_time_ms: Mapped[Optional[int]] = mapped_column(Integer)
+
+    # Parsed decision fields (from TradingDecision model)
+    action: Mapped[str] = mapped_column(
+        String(20), nullable=False, index=True,
+        comment="OPEN_LONG, OPEN_SHORT, CLOSE_POSITION, or HOLD"
+    )
+    coin: Mapped[str] = mapped_column(
+        String(10), nullable=False, index=True,
+        comment="BTC, ETH, SOL, BNB, DOGE, or XRP"
+    )
+    size_usd: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 2), nullable=False,
+        comment="Position size in USD (0 for HOLD/CLOSE)"
+    )
+    leverage: Mapped[int] = mapped_column(
+        Integer, nullable=False,
+        comment="Leverage 1-50x (1 for HOLD/CLOSE)"
+    )
+    stop_loss_price: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 2), nullable=False,
+        comment="Stop loss price (0 for HOLD/CLOSE)"
+    )
+    take_profit_price: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 2), nullable=False,
+        comment="Take profit price (0 for HOLD/CLOSE)"
+    )
+    confidence: Mapped[Decimal] = mapped_column(
+        DECIMAL(3, 2), nullable=False,
+        comment="Confidence score 0.00-1.00"
+    )
+    reasoning: Mapped[str] = mapped_column(
+        Text, nullable=False,
+        comment="LLM's reasoning for the decision"
+    )
+
+    # LLM interaction data
+    llm_response: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment="Raw response from LLM"
+    )
+    execution_time_ms: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        comment="Time taken for LLM call in milliseconds"
+    )
+
+    # Error tracking
+    error_message: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment="Error message if status=failed"
+    )
 
     # Relationships
     agent: Mapped["TradingAgent"] = relationship(back_populates="decisions")
@@ -111,13 +193,29 @@ class AgentDecision(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "execution_status IN ('pending', 'executed', 'failed', 'skipped')",
-            name="check_agent_decisions_execution_status",
+            "status IN ('success', 'failed', 'parsing_error')",
+            name="check_agent_decisions_status",
+        ),
+        CheckConstraint(
+            "action IN ('OPEN_LONG', 'OPEN_SHORT', 'CLOSE_POSITION', 'HOLD')",
+            name="check_agent_decisions_action",
+        ),
+        CheckConstraint(
+            "coin IN ('BTC', 'ETH', 'SOL', 'BNB', 'DOGE', 'XRP')",
+            name="check_agent_decisions_coin",
+        ),
+        CheckConstraint(
+            "leverage >= 1 AND leverage <= 50",
+            name="check_agent_decisions_leverage",
+        ),
+        CheckConstraint(
+            "confidence >= 0.00 AND confidence <= 1.00",
+            name="check_agent_decisions_confidence",
         ),
     )
 
     def __repr__(self) -> str:
-        return f"<AgentDecision(agent_id={self.agent_id}, status='{self.execution_status}')>"
+        return f"<AgentDecision(agent_id={self.agent_id}, action='{self.action}', coin='{self.coin}', status='{self.status}')>"
 
 
 class AgentTrade(Base):
@@ -129,9 +227,9 @@ class AgentTrade(Base):
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
     agent_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
+        PG_UUID(as_uuid=True), ForeignKey("trading_agents.id"), nullable=False, index=True
     )
-    decision_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True))
+    decision_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_decisions.id"))
     coin: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     side: Mapped[str] = mapped_column(String(10), nullable=False)
     size: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
@@ -177,7 +275,7 @@ class AgentPerformance(Base):
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
     agent_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
+        PG_UUID(as_uuid=True), ForeignKey("trading_agents.id"), nullable=False, index=True
     )
     snapshot_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True

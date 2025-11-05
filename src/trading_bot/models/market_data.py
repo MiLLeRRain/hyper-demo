@@ -46,12 +46,24 @@ class MarketData(BaseModel):
         arbitrary_types_allowed = True
 
 
+class Position(BaseModel):
+    """Current position information."""
+
+    coin: str
+    side: str  # "long" or "short"
+    size: float
+    entry_price: float
+    mark_price: float
+    position_value: float
+    unrealized_pnl: float
+    leverage: int
+    liquidation_price: float
+
+
 class AccountInfo(BaseModel):
     """Trading account information."""
 
-    balance: float
-    equity: float
+    account_value: float  # Total account value (equity)
+    withdrawable: float  # Available balance
     margin_used: float
-    margin_available: float
     unrealized_pnl: float
-    realized_pnl: float

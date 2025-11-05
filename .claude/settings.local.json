@@ -37,7 +37,8 @@
       "Bash(=2.9.0 alembic)",
       "Bash(=1.13.0)",
       "Bash(pip show:*)",
-      "Bash(=2.0.0)"
+      "Bash(=2.0.0)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
