@@ -42,7 +42,8 @@ class HyperLiquidExecutor:
         base_url: str,
         private_key: str,
         vault_address: Optional[str] = None,
-        timeout: int = 10
+        timeout: int = 10,
+        use_dynamic_assets: bool = True
     ):
         """Initialize executor.
 
@@ -51,6 +52,7 @@ class HyperLiquidExecutor:
             private_key: Private key for signing transactions
             vault_address: Optional vault/subaccount address
             timeout: Request timeout in seconds
+            use_dynamic_assets: If True, load assets from API; if False, use hardcoded
 
         Example:
             >>> executor = HyperLiquidExecutor(
@@ -65,9 +67,25 @@ class HyperLiquidExecutor:
         self.session = requests.Session()
         self.session.headers.update({"Content-Type": "application/json"})
 
+        # Asset index mapping cache
+        self._asset_index_cache: Dict[str, int] = {}
+        self._use_dynamic_assets = use_dynamic_assets
+
+        # Load asset indices if dynamic mode is enabled
+        if use_dynamic_assets:
+            try:
+                self._load_asset_indices()
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load dynamic assets, falling back to hardcoded: {e}"
+                )
+                self._load_hardcoded_assets()
+        else:
+            self._load_hardcoded_assets()
+
         logger.info(
             f"Initialized HyperLiquidExecutor for {self.signer.address} "
-            f"on {self.base_url}"
+            f"on {self.base_url} with {len(self._asset_index_cache)} assets"
         )
 
     @retry(
@@ -461,11 +479,60 @@ class HyperLiquidExecutor:
             logger.error(f"Modify failed: {e}")
             return False, str(e)
 
+    def _load_asset_indices(self):
+        """Load asset indices from HyperLiquid meta API.
+
+        Fetches the complete list of available assets and builds
+        a mapping from coin symbol to asset index.
+
+        Raises:
+            Exception: If API call fails
+        """
+        payload = {"type": "meta"}
+        url = f"{self.base_url}/info"
+
+        try:
+            response = self.session.post(url, json=payload, timeout=self.timeout)
+            response.raise_for_status()
+            data = response.json()
+
+            # Build asset index cache from universe
+            universe = data.get("universe", [])
+            for index, asset in enumerate(universe):
+                coin = asset.get("name")
+                if coin:
+                    self._asset_index_cache[coin] = index
+
+            logger.info(f"Loaded {len(self._asset_index_cache)} assets from API")
+
+        except Exception as e:
+            logger.error(f"Failed to load assets from API: {e}")
+            raise
+
+    def _load_hardcoded_assets(self):
+        """Load hardcoded asset indices as fallback.
+
+        This is used when dynamic loading fails or is disabled.
+        The mapping is based on common top assets.
+        """
+        self._asset_index_cache = {
+            "BTC": 0,
+            "ETH": 1,
+            "SOL": 2,
+            "XRP": 3,
+            "DOGE": 4,
+            "BNB": 5,
+            "ADA": 6,
+            "AVAX": 7,
+            "MATIC": 8,
+            "LINK": 9
+        }
+        logger.info(
+            f"Loaded {len(self._asset_index_cache)} hardcoded assets"
+        )
+
     def _get_asset_index(self, coin: str) -> int:
         """Get asset index for coin symbol.
-
-        This is a temporary implementation. Task 3.1.3 will implement
-        proper asset index mapping from the meta() API endpoint.
 
         Args:
             coin: Coin symbol (BTC, ETH, etc)
@@ -476,24 +543,46 @@ class HyperLiquidExecutor:
         Raises:
             ValueError: If coin is not supported
         """
-        # Temporary hardcoded mapping
-        # TODO: Implement dynamic loading from meta() API in Task 3.1.3
-        coin_to_index = {
-            "BTC": 0,
-            "ETH": 1,
-            "SOL": 2,
-            "XRP": 3,
-            "DOGE": 4,
-            "BNB": 5
-        }
+        if coin not in self._asset_index_cache:
+            # Try to refresh asset cache if in dynamic mode
+            if self._use_dynamic_assets:
+                try:
+                    logger.info(f"Asset {coin} not in cache, refreshing...")
+                    self._load_asset_indices()
+                except Exception as e:
+                    logger.warning(f"Failed to refresh assets: {e}")
 
-        if coin not in coin_to_index:
-            raise ValueError(
-                f"Unsupported coin: {coin}. "
-                f"Supported: {', '.join(coin_to_index.keys())}"
-            )
+            # Check again after refresh
+            if coin not in self._asset_index_cache:
+                available = ", ".join(sorted(self._asset_index_cache.keys())[:10])
+                raise ValueError(
+                    f"Unsupported coin: {coin}. "
+                    f"Available assets (first 10): {available}..."
+                )
 
-        return coin_to_index[coin]
+        return self._asset_index_cache[coin]
+
+    def refresh_assets(self):
+        """Manually refresh the asset index cache from API.
+
+        This can be called periodically to ensure the cache is up-to-date
+        with any new assets added to the exchange.
+
+        Raises:
+            Exception: If API call fails and use_dynamic_assets is True
+        """
+        if self._use_dynamic_assets:
+            self._load_asset_indices()
+        else:
+            logger.warning("Asset refresh ignored: dynamic assets disabled")
+
+    def get_supported_assets(self) -> List[str]:
+        """Get list of currently supported asset symbols.
+
+        Returns:
+            List of coin symbols
+        """
+        return sorted(self._asset_index_cache.keys())
 
     def get_address(self) -> str:
         """Get the wallet address used by this executor.

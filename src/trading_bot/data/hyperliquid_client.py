@@ -244,6 +244,31 @@ class HyperliquidClient:
             logger.error(f"Failed to fetch open interest: {e}")
             return 0.0
 
+    def get_meta(self) -> Dict[str, any]:
+        """
+        Get exchange metadata including all available assets.
+
+        Returns:
+            Dictionary with meta information including:
+            - universe: List of all available assets with their details
+
+        Example:
+            >>> client = HyperliquidClient("https://api.hyperliquid.xyz")
+            >>> meta = client.get_meta()
+            >>> print(meta["universe"][0])
+            {'name': 'BTC', 'szDecimals': 5, ...}
+        """
+        payload = {"type": "meta"}
+
+        try:
+            data = self._post("/info", payload)
+            logger.info(f"Fetched meta for {len(data.get('universe', []))} assets")
+            return data
+
+        except Exception as e:
+            logger.error(f"Failed to fetch meta: {e}")
+            raise
+
     def get_funding_rate(self, coin: str) -> float:
         """
         Get current funding rate for a coin.
