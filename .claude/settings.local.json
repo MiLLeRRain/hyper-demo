@@ -38,7 +38,10 @@
       "Bash(=1.13.0)",
       "Bash(pip show:*)",
       "Bash(=2.0.0)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(git merge:*)",
+      "Bash(git reset:*)",
+      "Bash(git tag:*)"
     ],
     "deny": [],
     "ask": []

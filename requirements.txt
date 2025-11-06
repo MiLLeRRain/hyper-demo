@@ -37,6 +37,13 @@ eth-account>=0.10.0  # Ethereum account and EIP-712 signing
 web3>=6.11.0  # Web3 utilities
 eth-utils>=2.3.0  # Ethereum utilities
 
+# Automation (Phase 4)
+APScheduler==3.10.4  # Job scheduling
+click==8.1.7  # CLI framework
+python-daemon==3.0.1  # Daemon process
+tabulate==0.9.0  # Table formatting for CLI
+psutil==5.9.6  # System metrics
+
 # Future dependencies (Phase 2+)
 # openai>=1.0.0  # For LLM integration
 # fastapi>=0.104.0  # For web API (Phase 5)
