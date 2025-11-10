@@ -16,7 +16,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from unittest.mock import Mock
 
-from trading_bot.models.database import Base, TradingAgent, Position, Order
+from trading_bot.models.database import Base, TradingAgent, AgentTrade
 
 
 @pytest.fixture(scope="session")
@@ -229,43 +229,18 @@ def mock_deepseek_client():
     return client
 
 
-@pytest.fixture(scope="function")
-def sample_position(test_db_session, sample_agent):
-    """Create a sample position for testing."""
-    position = Position(
-        agent_id=sample_agent.id,
-        symbol="BTC",
-        side="long",
-        size=Decimal("0.1"),
-        entry_price=Decimal("50000.0"),
-        leverage=5,
-        status="open",
-        unrealized_pnl=Decimal("100.0")
-    )
-    test_db_session.add(position)
-    test_db_session.commit()
-    test_db_session.refresh(position)
-
-    return position
-
-
-@pytest.fixture(scope="function")
-def sample_order(test_db_session, sample_agent):
-    """Create a sample order for testing."""
-    order = Order(
-        agent_id=sample_agent.id,
-        symbol="BTC",
-        order_type="limit",
-        side="buy",
-        size=Decimal("0.1"),
-        price=Decimal("50000.0"),
-        status="pending"
-    )
-    test_db_session.add(order)
-    test_db_session.commit()
-    test_db_session.refresh(order)
-
-    return order
+# Note: Position and Order fixtures commented out as these models
+# are not yet implemented. Will be added when Phase 3 is complete.
+#
+# @pytest.fixture(scope="function")
+# def sample_position(test_db_session, sample_agent):
+#     """Create a sample position for testing."""
+#     pass
+#
+# @pytest.fixture(scope="function")
+# def sample_order(test_db_session, sample_agent):
+#     """Create a sample order for testing."""
+#     pass
 
 
 # Pytest configuration

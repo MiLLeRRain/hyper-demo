@@ -30,7 +30,7 @@ class TestTradingExecutionDryRun:
         assert executor.dry_run is True
         assert executor._dry_run_order_id_counter == 10000
 
-        print(f"\n✅ Executor initialized in DRY-RUN mode")
+        print(f"\n[OK] Executor initialized in DRY-RUN mode")
         print(f"   Address: {executor.get_address()}")
 
     def test_place_limit_order_dry_run(self, test_config):
@@ -65,7 +65,7 @@ class TestTradingExecutionDryRun:
         assert order_data["price"] == 50000.0
         assert order_data["status"] == "filled"
 
-        print(f"\n✅ [DRY-RUN] Limit order placed successfully")
+        print(f"\n[OK] [DRY-RUN] Limit order placed successfully")
         print(f"   Order ID: {order_id}")
         print(f"   BTC BUY 0.1 @ $50,000")
 
@@ -96,7 +96,7 @@ class TestTradingExecutionDryRun:
         assert order_data["is_buy"] is False
         assert order_data["order_type"] == "market"
 
-        print(f"\n✅ [DRY-RUN] Market order placed successfully")
+        print(f"\n[OK] [DRY-RUN] Market order placed successfully")
         print(f"   Order ID: {order_id}")
         print(f"   ETH SELL 1.0 @ MARKET")
 
@@ -128,7 +128,7 @@ class TestTradingExecutionDryRun:
         order_data = executor._dry_run_orders[order_id]
         assert order_data["status"] == "cancelled"
 
-        print(f"\n✅ [DRY-RUN] Order cancelled successfully")
+        print(f"\n[OK] [DRY-RUN] Order cancelled successfully")
         print(f"   Order ID: {order_id}")
 
     def test_cancel_nonexistent_order_dry_run(self, test_config):
@@ -146,7 +146,7 @@ class TestTradingExecutionDryRun:
         assert success is False
         assert error == "Order not found"
 
-        print(f"\n✅ [DRY-RUN] Correctly handled non-existent order cancellation")
+        print(f"\n[OK] [DRY-RUN] Correctly handled non-existent order cancellation")
 
     def test_update_leverage_dry_run(self, test_config):
         """Test updating leverage in dry-run mode."""
@@ -163,7 +163,7 @@ class TestTradingExecutionDryRun:
         assert success is True
         assert error is None
 
-        print(f"\n✅ [DRY-RUN] Leverage updated successfully")
+        print(f"\n[OK] [DRY-RUN] Leverage updated successfully")
         print(f"   BTC: 5x (cross margin)")
 
     def test_invalid_leverage_dry_run(self, test_config):
@@ -181,7 +181,7 @@ class TestTradingExecutionDryRun:
         assert success is False
         assert "Invalid leverage" in error
 
-        print(f"\n✅ [DRY-RUN] Correctly rejected invalid leverage")
+        print(f"\n[OK] [DRY-RUN] Correctly rejected invalid leverage")
         print(f"   Error: {error}")
 
     def test_multiple_orders_dry_run(self, test_config):
@@ -212,7 +212,7 @@ class TestTradingExecutionDryRun:
         assert len(orders_placed) == 3
         assert len(executor._dry_run_orders) == 3
 
-        print(f"\n✅ [DRY-RUN] Placed {len(orders_placed)} orders:")
+        print(f"\n[OK] [DRY-RUN] Placed {len(orders_placed)} orders:")
         for coin, oid in orders_placed:
             order_data = executor._dry_run_orders[oid]
             side = "BUY" if order_data["is_buy"] else "SELL"
@@ -243,7 +243,7 @@ class TestTradingExecutionDryRun:
         # Verify IDs increment sequentially
         assert order_ids == [10001, 10002, 10003, 10004, 10005]
 
-        print(f"\n✅ [DRY-RUN] Order IDs increment correctly:")
+        print(f"\n[OK] [DRY-RUN] Order IDs increment correctly:")
         print(f"   {order_ids}")
 
     def test_dry_run_vs_live_mode_flag(self, test_config):
@@ -265,7 +265,7 @@ class TestTradingExecutionDryRun:
         assert dry_executor.dry_run is True
         assert live_executor.dry_run is False
 
-        print(f"\n✅ Dry-run flag correctly set:")
+        print(f"\n[OK] Dry-run flag correctly set:")
         print(f"   Dry executor: {dry_executor.dry_run}")
         print(f"   Live executor: {live_executor.dry_run}")
 
@@ -296,7 +296,7 @@ class TestTradingExecutionDryRun:
         # Dry-run should be very fast (< 0.1s for 10 orders)
         assert duration < 0.1
 
-        print(f"\n✅ [DRY-RUN] Placed 10 orders in {duration:.4f}s")
+        print(f"\n[OK] [DRY-RUN] Placed 10 orders in {duration:.4f}s")
         print(f"   Average: {duration/10*1000:.2f}ms per order")
 
     def test_unsupported_asset_handling(self, test_config):
@@ -322,7 +322,7 @@ class TestTradingExecutionDryRun:
 
         except ValueError as e:
             assert "Unsupported coin" in str(e)
-            print(f"\n✅ [DRY-RUN] Correctly rejected unsupported asset")
+            print(f"\n[OK] [DRY-RUN] Correctly rejected unsupported asset")
             print(f"   Error: {str(e)}")
 
     def test_get_supported_assets(self, test_config):
@@ -339,5 +339,5 @@ class TestTradingExecutionDryRun:
         assert len(assets) > 0
         assert "BTC" in assets or "ETH" in assets
 
-        print(f"\n✅ Supported assets ({len(assets)} total):")
+        print(f"\n[OK] Supported assets ({len(assets)} total):")
         print(f"   {', '.join(assets[:10])}...")

@@ -23,7 +23,13 @@ Usage:
 import sys
 import subprocess
 import argparse
+import os
 from pathlib import Path
+
+# Add src directory to Python path
+project_root = Path(__file__).parent
+src_path = project_root / "src"
+sys.path.insert(0, str(src_path))
 
 
 def main():
@@ -82,28 +88,33 @@ def main():
         "--tb=short",  # Shorter traceback format
         "--color=yes",  # Colored output
         "-s",  # Don't capture output (show print statements)
+        "--no-cov",  # Disable coverage for integration tests
     ])
 
     print("=" * 80)
-    print("🧪 Running Integration Tests (Dry-Run Mode)")
+    print("Running Integration Tests (Dry-Run Mode)")
     print("=" * 80)
     print(f"\nCommand: {' '.join(cmd)}\n")
-    print("📋 Test Configuration:")
-    print("   ✅ Mode: DRY-RUN (Safe - No real trades)")
-    print("   ✅ Market Data: REAL (from HyperLiquid API)")
-    print("   ✅ Trade Execution: SIMULATED")
-    print("   ✅ Risk Level: ZERO\n")
+    print("Test Configuration:")
+    print("   [+] Mode: DRY-RUN (Safe - No real trades)")
+    print("   [+] Market Data: REAL (from HyperLiquid API)")
+    print("   [+] Trade Execution: SIMULATED")
+    print("   [+] Risk Level: ZERO\n")
     print("=" * 80)
 
+    # Set PYTHONPATH for subprocess
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(src_path)
+
     # Run pytest
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, env=env)
 
     # Print summary
     print("\n" + "=" * 80)
     if result.returncode == 0:
-        print("✅ All tests passed!")
+        print("[SUCCESS] All tests passed!")
     else:
-        print("❌ Some tests failed. Please review the output above.")
+        print("[FAILED] Some tests failed. Please review the output above.")
     print("=" * 80)
 
     return result.returncode

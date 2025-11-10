@@ -9,7 +9,7 @@ Tests HyperLiquid data collection in dry-run mode:
 import pytest
 from decimal import Decimal
 
-from trading_bot.hyperliquid.client import HyperLiquidClient
+from trading_bot.data.hyperliquid_client import HyperliquidClient
 
 
 @pytest.mark.integration
@@ -18,7 +18,7 @@ class TestDataCollection:
 
     def test_client_initialization(self, test_config):
         """Test HyperLiquid client initialization."""
-        client = HyperLiquidClient(
+        client = HyperliquidClient(
             base_url=test_config["hyperliquid"]["base_url"]
         )
 
@@ -31,7 +31,7 @@ class TestDataCollection:
         This test calls the REAL HyperLiquid API to fetch current prices.
         Safe to run in dry-run mode as it's read-only.
         """
-        client = HyperLiquidClient(
+        client = HyperliquidClient(
             base_url=test_config["hyperliquid"]["base_url"]
         )
 
@@ -49,7 +49,7 @@ class TestDataCollection:
                 assert isinstance(mids[coin], (int, float))
                 assert mids[coin] > 0
 
-        print(f"\n✅ Fetched prices for {len(mids)} coins")
+        print(f"\n[OK] Fetched prices for {len(mids)} coins")
         print(f"   BTC: ${mids.get('BTC', 'N/A')}")
         print(f"   ETH: ${mids.get('ETH', 'N/A')}")
 
@@ -59,7 +59,7 @@ class TestDataCollection:
         This test calls the REAL HyperLiquid API.
         Safe to run as it's read-only.
         """
-        client = HyperLiquidClient(
+        client = HyperliquidClient(
             base_url=test_config["hyperliquid"]["base_url"]
         )
 
@@ -94,7 +94,7 @@ class TestDataCollection:
         spread = best_ask_px - best_bid_px
         spread_pct = (spread / best_bid_px) * 100
 
-        print(f"\n✅ BTC Order Book:")
+        print(f"\n[OK] BTC Order Book:")
         print(f"   Best Bid: ${best_bid_px:.2f}")
         print(f"   Best Ask: ${best_ask_px:.2f}")
         print(f"   Spread: ${spread:.2f} ({spread_pct:.4f}%)")
@@ -105,7 +105,7 @@ class TestDataCollection:
         Note: This will return empty state for test address,
         but validates API connectivity.
         """
-        client = HyperLiquidClient(
+        client = HyperliquidClient(
             base_url=test_config["hyperliquid"]["base_url"]
         )
 
@@ -119,11 +119,11 @@ class TestDataCollection:
         assert user_state is not None
         assert "marginSummary" in user_state or "assetPositions" in user_state
 
-        print(f"\n✅ User state fetch successful for {test_address}")
+        print(f"\n[OK] User state fetch successful for {test_address}")
 
     def test_collect_multi_coin_data(self, test_config):
         """Test collecting data for multiple coins."""
-        client = HyperLiquidClient(
+        client = HyperliquidClient(
             base_url=test_config["hyperliquid"]["base_url"]
         )
 
@@ -150,15 +150,15 @@ class TestDataCollection:
                                 market_data[coin]["bid"] = float(bids[0]["px"])
                                 market_data[coin]["ask"] = float(asks[0]["px"])
                     except Exception as e:
-                        print(f"   ⚠️  Could not fetch order book for {coin}: {e}")
+                        print(f"   [WARN]  Could not fetch order book for {coin}: {e}")
 
             except Exception as e:
-                print(f"   ❌ Failed to fetch data for {coin}: {e}")
+                print(f"   [FAIL] Failed to fetch data for {coin}: {e}")
 
         # Verify we got at least some data
         assert len(market_data) > 0
 
-        print(f"\n✅ Collected data for {len(market_data)} coins:")
+        print(f"\n[OK] Collected data for {len(market_data)} coins:")
         for coin, data in market_data.items():
             price = data.get("price", "N/A")
             bid = data.get("bid", "N/A")
@@ -170,7 +170,7 @@ class TestDataCollection:
         """Test data collection performance (should be < 5 seconds)."""
         import time
 
-        client = HyperLiquidClient(
+        client = HyperliquidClient(
             base_url=test_config["hyperliquid"]["base_url"]
         )
 
@@ -192,11 +192,11 @@ class TestDataCollection:
         # Should complete in < 5 seconds (Phase 4 requirement)
         assert duration < 5.0
 
-        print(f"\n✅ Data collection completed in {duration:.2f}s (target: <5s)")
+        print(f"\n[OK] Data collection completed in {duration:.2f}s (target: <5s)")
 
     def test_error_handling_invalid_coin(self, test_config):
         """Test error handling for invalid coin symbol."""
-        client = HyperLiquidClient(
+        client = HyperliquidClient(
             base_url=test_config["hyperliquid"]["base_url"]
         )
 
@@ -208,15 +208,15 @@ class TestDataCollection:
             orderbook = client.get_l2_snapshot(invalid_coin)
             # If it returns something, verify it's None or error structure
             if orderbook:
-                print(f"\n⚠️  Got response for invalid coin: {orderbook}")
+                print(f"\n[WARN]  Got response for invalid coin: {orderbook}")
         except Exception as e:
             # Expected to raise exception
-            print(f"\n✅ Correctly handled invalid coin with error: {type(e).__name__}")
+            print(f"\n[OK] Correctly handled invalid coin with error: {type(e).__name__}")
             assert True
 
     def test_data_consistency(self, test_config):
         """Test that fetched data is consistent across multiple calls."""
-        client = HyperLiquidClient(
+        client = HyperliquidClient(
             base_url=test_config["hyperliquid"]["base_url"]
         )
 
@@ -237,7 +237,7 @@ class TestDataCollection:
             price_diff_pct = abs(price1 - price2) / price1 * 100
             assert price_diff_pct < 5.0
 
-            print(f"\n✅ Price consistency check passed:")
+            print(f"\n[OK] Price consistency check passed:")
             print(f"   Call 1: ${price1:.2f}")
             print(f"   Call 2: ${price2:.2f}")
             print(f"   Difference: {price_diff_pct:.4f}%")
