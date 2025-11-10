@@ -43,7 +43,8 @@ class HyperLiquidExecutor:
         private_key: str,
         vault_address: Optional[str] = None,
         timeout: int = 10,
-        use_dynamic_assets: bool = True
+        use_dynamic_assets: bool = True,
+        dry_run: bool = False
     ):
         """Initialize executor.
 
@@ -53,23 +54,36 @@ class HyperLiquidExecutor:
             vault_address: Optional vault/subaccount address
             timeout: Request timeout in seconds
             use_dynamic_assets: If True, load assets from API; if False, use hardcoded
+            dry_run: If True, simulate trades without executing (safe testing mode)
 
         Example:
+            >>> # Real trading
             >>> executor = HyperLiquidExecutor(
             ...     "https://api.hyperliquid.xyz",
             ...     "0xprivatekey"
+            ... )
+            >>> # Dry-run mode (testing)
+            >>> executor = HyperLiquidExecutor(
+            ...     "https://api.hyperliquid.xyz",
+            ...     "0xprivatekey",
+            ...     dry_run=True
             ... )
         """
         self.base_url = base_url.rstrip("/")
         self.signer = HyperLiquidSigner(private_key)
         self.vault_address = vault_address
         self.timeout = timeout
+        self.dry_run = dry_run
         self.session = requests.Session()
         self.session.headers.update({"Content-Type": "application/json"})
 
         # Asset index mapping cache
         self._asset_index_cache: Dict[str, int] = {}
         self._use_dynamic_assets = use_dynamic_assets
+
+        # Dry-run tracking
+        self._dry_run_order_id_counter = 10000
+        self._dry_run_orders: Dict[int, Dict[str, Any]] = {}
 
         # Load asset indices if dynamic mode is enabled
         if use_dynamic_assets:
@@ -83,9 +97,10 @@ class HyperLiquidExecutor:
         else:
             self._load_hardcoded_assets()
 
+        mode_str = "DRY-RUN MODE" if self.dry_run else "LIVE MODE"
         logger.info(
             f"Initialized HyperLiquidExecutor for {self.signer.address} "
-            f"on {self.base_url} with {len(self._asset_index_cache)} assets"
+            f"on {self.base_url} with {len(self._asset_index_cache)} assets [{mode_str}]"
         )
 
     @retry(
@@ -200,7 +215,30 @@ class HyperLiquidExecutor:
         if client_order_id:
             order["c"] = client_order_id
 
-        # Submit order
+        # DRY-RUN MODE: Simulate order without executing
+        if self.dry_run:
+            self._dry_run_order_id_counter += 1
+            order_id = self._dry_run_order_id_counter
+
+            # Store simulated order
+            self._dry_run_orders[order_id] = {
+                "coin": coin,
+                "is_buy": is_buy,
+                "size": float(size),
+                "price": float(price) if price else None,
+                "order_type": order_type,
+                "reduce_only": reduce_only,
+                "timestamp": time.time(),
+                "status": "filled"  # Simulate immediate fill
+            }
+
+            logger.info(
+                f"[DRY-RUN] Simulated order: {coin} {'BUY' if is_buy else 'SELL'} "
+                f"{size} @ {price or 'MARKET'} (OID: {order_id})"
+            )
+            return True, order_id, None
+
+        # LIVE MODE: Submit real order
         action = {
             "type": "order",
             "orders": [order],
@@ -260,6 +298,17 @@ class HyperLiquidExecutor:
         Example:
             >>> success, err = executor.cancel_order("BTC", 12345)
         """
+        # DRY-RUN MODE: Simulate cancel
+        if self.dry_run:
+            if order_id in self._dry_run_orders:
+                self._dry_run_orders[order_id]["status"] = "cancelled"
+                logger.info(f"[DRY-RUN] Simulated cancel: {coin} OID {order_id}")
+                return True, None
+            else:
+                logger.warning(f"[DRY-RUN] Order {order_id} not found")
+                return False, "Order not found"
+
+        # LIVE MODE: Real cancel
         asset_index = self._get_asset_index(coin)
 
         action = {
@@ -397,6 +446,15 @@ class HyperLiquidExecutor:
         if leverage < 1 or leverage > 50:
             return False, f"Invalid leverage {leverage}x (must be 1-50x)"
 
+        # DRY-RUN MODE: Simulate leverage update
+        if self.dry_run:
+            mode = "cross" if is_cross else "isolated"
+            logger.info(
+                f"[DRY-RUN] Simulated leverage update: {coin} -> {leverage}x ({mode})"
+            )
+            return True, None
+
+        # LIVE MODE: Real leverage update
         action = {
             "type": "updateLeverage",
             "asset": asset_index,

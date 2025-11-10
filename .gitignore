@@ -45,6 +45,7 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+.env.testnet
 
 # Configuration files with API keys
 config.yaml
