@@ -41,7 +41,10 @@ class TestHyperLiquidSigner:
     def test_initialize_without_0x_prefix(self):
         """Test initialization without 0x prefix."""
         account = Account.create()
-        private_key = account.key.hex()[2:]  # Remove 0x prefix
+        # Get private key bytes and convert to hex without 0x prefix
+        # Ensure proper padding to 64 hex characters (32 bytes)
+        private_key_bytes = bytes(account.key)
+        private_key = private_key_bytes.hex()  # Always 64 chars
 
         signer = HyperLiquidSigner(private_key)
         assert signer.address == account.address
