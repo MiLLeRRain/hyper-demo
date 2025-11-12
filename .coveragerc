@@ -1,0 +1,39 @@
+[run]
+source = src/trading_bot
+omit =
+    # Phase 4: Automation modules (CLI/daemon infrastructure)
+    src/trading_bot/automation/*
+    src/trading_bot/cli/*
+    src/trading_bot/monitoring/*
+
+    # Integration-heavy modules (tested in integration tests)
+    src/trading_bot/orchestration/multi_agent_orchestrator.py
+
+    # Test files
+    tests/*
+
+    # Init files
+    */__init__.py
+
+[report]
+exclude_lines =
+    # Standard pragma
+    pragma: no cover
+
+    # Don't complain about missing debug-only code
+    def __repr__
+    def __str__
+
+    # Don't complain if tests don't hit defensive assertion code
+    raise AssertionError
+    raise NotImplementedError
+
+    # Don't complain if non-runnable code isn't run
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+
+    # Don't complain about abstract methods
+    @abstractmethod
+    @abc.abstractmethod
+
+precision = 2
