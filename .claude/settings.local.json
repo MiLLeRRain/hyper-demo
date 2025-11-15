@@ -45,7 +45,20 @@
       "Bash(python run_integration_tests.py:*)",
       "Bash(set:*)",
       "Bash(powershell -Command \"$env:PYTHONPATH=''D:\\trae_projs\\hyper-demo\\src''; python run_integration_tests.py --fast\")",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git push:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(findstr:*)",
+      "Bash(move test_testnet_connection.py teststestnet )",
+      "Bash(move test_testnet_trading.py teststestnet )",
+      "Bash(move:*)",
+      "Bash(for file in tests/testnet/*.py)",
+      "Bash(do sed -i 's|sys.path.insert(0, str(Path(__file__).parent / \"\"src\"\"))|sys.path.insert(0, str(Path(__file__).parent.parent.parent / \"\"src\"\"))|g' \"$file\")",
+      "Bash(done)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(tee:*)"
     ],
     "deny": [],
     "ask": []

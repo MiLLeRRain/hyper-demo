@@ -4,8 +4,8 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Any
 
-from src.trading_bot.models.database import TradingAgent
-from src.trading_bot.models.market_data import AccountInfo, Position
+from trading_bot.models.database import TradingAgent
+from trading_bot.models.market_data import AccountInfo, Position
 
 logger = logging.getLogger(__name__)
 

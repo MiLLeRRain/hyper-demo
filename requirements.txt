@@ -6,6 +6,7 @@ python-dotenv>=1.0.0
 # HTTP client
 requests>=2.31.0
 tenacity>=8.2.0
+msgpack>=1.0.0  # Required by hyperliquid-python-sdk (explicit for clarity)
 
 # Data processing
 pandas>=2.0.0
@@ -33,7 +34,8 @@ psycopg2-binary>=2.9.0  # PostgreSQL driver
 alembic>=1.13.0  # Database migrations
 
 # Trading execution (Phase 3)
-eth-account>=0.10.0  # Ethereum account and EIP-712 signing
+hyperliquid-python-sdk>=0.20.0  # Official HyperLiquid SDK
+eth-account>=0.10.0  # Ethereum account (used by SDK)
 web3>=6.11.0  # Web3 utilities
 eth-utils>=2.3.0  # Ethereum utilities
 

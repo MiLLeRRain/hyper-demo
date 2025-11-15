@@ -1,153 +1,295 @@
-# HyperLiquid AI Trading Demo
+# HyperLiquid AI Trading Bot
 
 ![Tests](https://github.com/MiLLeRRain/hyper-demo/actions/workflows/tests.yml/badge.svg)
-![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
-![Coverage](https://img.shields.io/badge/coverage-92%25-brightgreen)
+![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
+![Coverage](https://img.shields.io/badge/coverage-94%25-brightgreen)
 
-基于 NoF1.ai 的 AI 交易系统研究与实现方案
+基于 HyperLiquid 永续合约交易所的 AI 驱动交易机器人
 
-## 项目简介
+---
 
-本项目研究了 NoF1.ai 的 AI 交易竞技场（Alpha Arena），该平台让多个 AI 模型在 HyperLiquid 去中心化永续合约交易所上进行实盘交易竞争。
+## 🎯 项目简介
 
-## 文档结构
+这是一个完整的 AI 交易系统，使用官方 HyperLiquid Python SDK，支持：
+
+- ✅ **多 AI 模型决策** - OpenAI, Anthropic, DeepSeek 等
+- ✅ **实时市场数据** - 价格、K线、技术指标
+- ✅ **自动交易执行** - 限价单、市价单、杠杆管理
+- ✅ **风险管理** - 仓位控制、止损止盈
+- ✅ **Testnet 测试** - 零风险测试环境
+- ✅ **完整测试覆盖** - 94% 代码覆盖率
+
+---
+
+## 🚀 快速开始
+
+### 方案 A: 快速测试（5分钟）
+
+适合快速验证系统功能：
+
+```bash
+# 1. 安装依赖
+pip install -r requirements.txt
+
+# 2. 配置 .env（添加私钥和 API key）
+cp .env.example .env
+# 编辑 .env，设置：
+#   HYPERLIQUID_PRIVATE_KEY=your_private_key
+#   DEEPSEEK_API_KEY=your_api_key
+
+# 3. 验证系统准备就绪
+python scripts/check_readiness.py
+
+# 4. 运行 Testnet 测试
+python tests/testnet/test_llm_integration.py
+```
+
+### 方案 B: 长期运行（生产模式）
+
+适合模拟真实交易，支持断点续传：
+
+```bash
+# 1. 安装 PostgreSQL 数据库（使用 Docker，最快捷）
+scripts/setup_database.bat  # Windows
+# 或
+scripts/setup_database.sh   # Linux/Mac
+
+# 2. 运行数据库迁移
+alembic upgrade head
+
+# 3. 验证完整配置
+python scripts/check_readiness.py
+
+# 4. 启动机器人（3分钟自动周期）
+python tradingbot.py start
+
+# 5. 监控运行状态
+python tradingbot.py status
+python tradingbot.py logs -f
+```
+
+📖 **详细指南**: [长期运行完整指南](docs/LONG_TERM_RUNNING_GUIDE.md)
+
+---
+
+## 📁 项目结构
 
 ```
 hyper-demo/
-├── docs/                                          # 文档目录
-│   ├── nof1_ai_analysis.md                       # NoF1.ai 平台完整技术分析
-│   ├── nof1_ai_system_prompts_and_outputs.md     # AI 系统提示词和输出格式
-│   ├── hyperliquid_api_data_availability_CN.md   # HyperLiquid API 数据可用性分析
-│   ├── hyperliquid_trading_api_guide_CN.md       # HyperLiquid 交易 API 完整指南
-│   └── hyperliquid_margin_and_fees_CN.md         # HyperLiquid 保证金和费用文档
-├── architecture/                                  # 架构设计文档
-│   └── implementation_approaches.md               # 多种实现方案对比
-└── README.md                                      # 本文件
+├── docs/                    # 📚 完整文档
+│   ├── TESTNET_QUICK_START.md
+│   ├── COMMANDS.md
+│   ├── TEST_RESULTS.md
+│   └── PROJECT_STRUCTURE.md
+│
+├── scripts/                 # 🛠️ 工具脚本
+│   ├── run_integration_tests.py
+│   └── verify_wallet.py
+│
+├── src/trading_bot/         # 📦 核心代码
+│   ├── data/               # 市场数据收集
+│   ├── ai/                 # AI 决策引擎
+│   ├── trading/            # 交易执行 ⭐ 官方 SDK
+│   ├── risk/               # 风险管理
+│   └── automation/         # 自动化调度
+│
+└── tests/                   # 🧪 完整测试
+    ├── unit/               # 单元测试
+    ├── integration/        # 集成测试 (DRY-RUN)
+    ├── testnet/            # Testnet 实际测试
+    └── manual/             # 调试脚本
 ```
 
-## NoF1.ai 核心特性
+详细结构见 [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
 
-- **6 个 AI 模型竞争**：GPT-5, Claude Sonnet 4.5, Gemini 2.5 Pro, Grok 4, DeepSeek Chat V3.1, Qwen3 Max
-- **实盘交易**：每个模型获得 $10,000 初始资金
-- **交易市场**：BTC, ETH, SOL, BNB, DOGE, XRP 永续合约
-- **数据驱动**：提供 EMA, MACD, RSI, ATR 等技术指标
-- **REST API 轮询**：3 分钟间隔（非 WebSocket）
+---
 
-## HyperLiquid 平台特点
+## 🧪 测试
 
-- **去中心化永续合约交易所（DEX）**
-- **链上订单簿**：运行在 HyperLiquid L1 区块链
-- **高杠杆**：BTC 最高 40x，ETH 最高 25x
-- **低费用**：Maker 0%-0.015%, Taker 0.024%-0.045%
-- **无借贷利息**：0% 借贷费用
-- **完全免费的市场数据 API**
-
-## 实现方案
-
-详见 [implementation_approaches.md](./architecture/implementation_approaches.md)，包括：
-
-1. **Web 应用** (Next.js + React)
-2. **桌面应用** (Electron / Tauri)
-3. **命令行工具** (Python CLI)
-4. **Telegram Bot**
-5. **移动应用** (React Native / Flutter)
-6. **纯后端服务** (FastAPI + Celery)
-
-## 快速开始
-
-### 前置要求
-
-- Python 3.8+
-- Node.js 16+ (如果选择 Web/桌面应用)
-- HyperLiquid 账户和私钥
-- AI API 密钥 (OpenAI, Anthropic, Google, etc.)
-
-### 安装依赖
+### 推荐测试流程
 
 ```bash
-# Python 依赖
-pip install hyperliquid-python-sdk pandas numpy requests
+# 1. 验证钱包地址
+python scripts/verify_wallet.py
 
-# 如果使用 Web 应用
-npm install
+# 2. 测试 Testnet 连接
+python tests/testnet/test_testnet_connection.py
+
+# 3. 快速订单测试（下单→取消）
+python tests/testnet/test_order_placement.py
+
+# 4. 运行集成测试
+python scripts/run_integration_tests.py --fast
 ```
 
-### 配置
+### 测试结果
 
+- ✅ 30/32 集成测试通过
+- ✅ Testnet 订单执行成功
+- ✅ 官方 SDK 集成验证
+- ✅ 94% 测试覆盖率
+
+查看完整测试报告：[docs/TEST_RESULTS.md](docs/TEST_RESULTS.md)
+
+---
+
+## 📚 核心功能
+
+### 1️⃣ 数据收集 (Phase 1)
+- 实时价格数据（473+ 币种）
+- K线数据（多时间周期）
+- 技术指标计算
+- 订单簿快照
+
+### 2️⃣ AI 决策 (Phase 2)
+- 多 AI 模型集成
+- 智能 Prompt 构建
+- 决策解析和验证
+- 多 Agent 协作
+
+### 3️⃣ 交易执行 (Phase 3) ⭐
+- **官方 SDK 集成**
+- 限价单 / 市价单
+- 杠杆管理
+- Tick size 自动处理
+- Dry-run 模式
+
+### 4️⃣ 风险管理
+- 仓位控制
+- 杠杆限制
+- 止损止盈
+- 每日损失限制
+
+### 5️⃣ 自动化 (Phase 4)
+- 定时任务调度
+- CLI 工具
+- 监控和告警
+
+---
+
+## 🔑 关键特性
+
+### ✅ 官方 SDK 集成
+使用 `hyperliquid-python-sdk>=0.20.0`：
+- EIP-712 签名
+- 自动 tick size 处理
+- 完整 API 支持
+
+### ✅ Testnet 支持
+零风险测试环境：
+- 免费 testnet 代币
+- 完整功能测试
+- 安全的策略验证
+
+### ✅ 完整测试
+- 单元测试（快速、隔离）
+- 集成测试（DRY-RUN）
+- Testnet 实际测试
+- 94% 代码覆盖率
+
+---
+
+## 📖 文档
+
+| 文档 | 说明 |
+|------|------|
+| [LONG_TERM_RUNNING_GUIDE.md](docs/LONG_TERM_RUNNING_GUIDE.md) | ⭐ 长期运行完整指南（断点续传） |
+| [TESTNET_QUICK_START.md](docs/TESTNET_QUICK_START.md) | Testnet 快速开始指南 |
+| [LLM_INTEGRATION_GUIDE.md](docs/LLM_INTEGRATION_GUIDE.md) | LLM API 集成测试指南 |
+| [COMMANDS.md](docs/COMMANDS.md) | 所有命令参考 |
+| [TEST_RESULTS.md](docs/TEST_RESULTS.md) | 完整测试报告 |
+| [PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) | 项目结构详解 |
+| [tests/README.md](tests/README.md) | 测试目录说明 |
+
+---
+
+## ⚙️ 配置文件
+
+### `.env` - 私钥配置
 ```bash
-# 创建环境变量文件
-cp .env.example .env
-
-# 编辑 .env 文件，添加：
-# - HyperLiquid 私钥
-# - AI API 密钥
-# - 其他配置参数
+HYPERLIQUID_PRIVATE_KEY=your_private_key_here
 ```
 
-## 技术栈建议
+### `config.yaml` - 系统配置
+```yaml
+environment: 'testnet'  # or 'mainnet'
 
-### 后端
-- **Python**: 数据处理、AI 调用、交易逻辑
-- **FastAPI**: REST API 服务
-- **Celery + Redis**: 定时任务和异步处理
-- **PostgreSQL**: 数据存储
-- **TimescaleDB**: 时序数据优化
+testnet:
+  hyperliquid:
+    base_url: 'https://api.hyperliquid-testnet.xyz'
+  risk:
+    max_position_size_usdc: 1000.0
+    max_leverage: 5
+```
 
-### 前端（可选）
-- **Next.js 14+**: React 框架
-- **TypeScript**: 类型安全
-- **TailwindCSS**: 样式
-- **Recharts**: 图表可视化
-- **shadcn/ui**: UI 组件库
+---
 
-### 部署
-- **Docker + Docker Compose**: 容器化
-- **Vercel / Railway**: 前端部署
-- **AWS / DigitalOcean**: 后端部署
+## 🔗 技术栈
 
-## 核心功能模块
+### 核心技术
+- **Python 3.12+** - 主语言
+- **hyperliquid-python-sdk** - 官方交易 SDK
+- **SQLAlchemy** - 数据库 ORM
+- **OpenAI / DeepSeek** - AI 模型
 
-1. **市场数据采集**
-   - HyperLiquid WebSocket 实时价格
-   - 技术指标计算 (EMA, MACD, RSI, ATR)
-   - 开放利息和资金费率追踪
+### 数据处理
+- **pandas** - 数据分析
+- **pandas-ta** - 技术指标
+- **numpy** - 数值计算
 
-2. **AI 决策引擎**
-   - 多 AI 模型集成
-   - 提示词工程和上下文管理
-   - 决策结果解析和验证
+### 测试
+- **pytest** - 测试框架
+- **pytest-cov** - 覆盖率
+- **pytest-asyncio** - 异步测试
 
-3. **交易执行**
-   - 订单管理（限价、市价、止损止盈）
-   - 风险管理（仓位控制、杠杆管理）
-   - 滑点和费用优化
+### 自动化
+- **APScheduler** - 任务调度
+- **Click** - CLI 工具
 
-4. **性能追踪**
-   - 实时盈亏计算
-   - 夏普比率和其他指标
-   - 交易历史记录
+---
 
-5. **可视化界面**（可选）
-   - 实时仪表盘
-   - 图表和指标展示
-   - AI 决策透明化
+## ⚠️ 风险提示
 
-## 风险提示
+**重要提醒**：
 
-⚠️ **重要提醒**
+- ⚠️ 加密货币交易涉及高风险
+- ⚠️ 永续合约杠杆交易风险极高
+- ⚠️ AI 交易不保证盈利
+- ⚠️ 请先在 Testnet 充分测试
+- ⚠️ 妥善保管私钥，切勿泄露
+- ✅ 仅用于学习和研究目的
 
-- 加密货币交易涉及高风险，可能导致全部资金损失
-- AI 交易系统不保证盈利，历史表现不代表未来结果
-- 永续合约杠杆交易风险极高，请谨慎使用
-- 仅用于学习和研究目的，实盘交易需自行承担风险
-- 妥善保管私钥，切勿泄露
+---
 
-## 许可证
+## 📊 开发进度
+
+- [x] Phase 1: 数据收集 ✅
+- [x] Phase 2: AI 决策 ✅
+- [x] Phase 3: 交易执行 ✅ (官方 SDK)
+- [x] Phase 4: 自动化 ✅
+- [ ] Phase 5: Web 界面 (计划中)
+
+---
+
+## 🤝 贡献
+
+欢迎提交 Issue 和 Pull Request！
+
+---
+
+## 📄 许可证
 
 MIT License
 
-## 参考资源
+---
 
-- [NoF1.ai](https://nof1.ai/)
-- [HyperLiquid 文档](https://hyperliquid.gitbook.io/hyperliquid-docs)
-- [HyperLiquid Python SDK](https://github.com/hyperliquid-dex/hyperliquid-python-sdk)
+## 🔗 相关链接
+
+- [HyperLiquid Testnet](https://app.hyperliquid-testnet.xyz)
+- [HyperLiquid 文档](https://hyperliquid.gitbook.io)
+- [官方 Python SDK](https://github.com/hyperliquid-dex/hyperliquid-python-sdk)
+- [NoF1.ai 平台](https://nof1.ai/)
+
+---
+
+**快速开始**: `python tests/testnet/test_order_placement.py` 🚀

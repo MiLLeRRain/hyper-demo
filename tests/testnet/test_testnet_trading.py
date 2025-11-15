@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test real trading on HyperLiquid Testnet.
 
-⚠️ WARNING: This script places REAL orders on testnet!
+[!] WARNING: This script places REAL orders on testnet!
 While testnet tokens have no value, this tests actual order placement.
 
 Usage:
@@ -15,7 +15,7 @@ from decimal import Decimal
 from time import sleep
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from dotenv import load_dotenv
 from trading_bot.trading.hyperliquid_executor import HyperLiquidExecutor
@@ -160,10 +160,10 @@ def main():
     print("\n" + "=" * 70)
     print("  HyperLiquid Testnet Trading Test")
     print("=" * 70)
-    print("\n  ⚠️  WARNING: This will place REAL orders on testnet!")
-    print("  ✅ Testnet tokens have no value - completely safe")
-    print("  ✅ Orders will be placed far from market price")
-    print("  ✅ Orders will be cancelled immediately")
+    print("\n  [!] WARNING: This will place REAL orders on testnet!")
+    print("  [OK] Testnet tokens have no value - completely safe")
+    print("  [OK] Orders will be placed far from market price")
+    print("  [OK] Orders will be cancelled immediately")
     print("\n" + "=" * 70)
 
     # Confirmation
@@ -186,13 +186,17 @@ def main():
         print("\n  [FAIL] HYPERLIQUID_PRIVATE_KEY not set")
         return 1
 
+    # Debug: Print private key info
+    print(f"\n  [DEBUG] Private key loaded: {private_key[:20]}...")
+    print(f"  [DEBUG] Has 0x prefix: {private_key.startswith('0x')}")
+
     # Create executor
     print("\n  Initializing testnet executor...")
     try:
         executor = HyperLiquidExecutor(
             base_url="https://api.hyperliquid-testnet.xyz",
             private_key=private_key,
-            dry_run=False  # ⚠️ REAL testnet trading
+            dry_run=False  # [!] REAL testnet trading
         )
         print(f"  [OK] Connected to testnet")
         print(f"       Wallet: {executor.get_address()}")
@@ -230,9 +234,9 @@ def main():
         print("  [SUCCESS] All trading tests passed!")
         print("=" * 70)
         print("\n  You have successfully:")
-        print("  ✅ Placed a limit order on testnet")
-        print("  ✅ Cancelled an order")
-        print("  ✅ Set leverage for multiple coins")
+        print("  [OK] Placed a limit order on testnet")
+        print("  [OK] Cancelled an order")
+        print("  [OK] Set leverage for multiple coins")
         print("\n  Next steps:")
         print("  1. Review config.yaml and set environment: 'testnet'")
         print("  2. Run the full trading bot with AI decision making")

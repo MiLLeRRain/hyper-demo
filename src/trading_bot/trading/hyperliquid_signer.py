@@ -1,18 +1,17 @@
 """EIP-712 signing for HyperLiquid Exchange API.
 
-This module implements signing for HyperLiquid exchange operations using
-the EIP-712 standard. It's based on the official HyperLiquid Python SDK.
+This module wraps the official HyperLiquid Python SDK signing functions.
 
 Reference: https://github.com/hyperliquid-dex/hyperliquid-python-sdk
 """
 
-import json
 import logging
 from typing import Any, Dict, Optional
 
 from eth_account import Account
-from eth_account.messages import encode_typed_data
 from eth_utils import to_checksum_address
+from hyperliquid.utils.signing import sign_l1_action as hl_sign_l1_action
+from hyperliquid.utils.signing import sign_user_signed_action as hl_sign_user_signed_action
 
 logger = logging.getLogger(__name__)
 
@@ -63,10 +62,10 @@ class HyperLiquidSigner:
         nonce: int,
         vault_address: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Sign an L1 action (orders, cancels, leverage updates, etc).
+        """Sign an L1 action using official HyperLiquid SDK.
 
-        This creates an EIP-712 signature for actions on the HyperLiquid exchange.
-        The signature proves that the wallet owner authorizes the action.
+        This uses the official HyperLiquid Python SDK signing function
+        to ensure 100% compatibility with the exchange.
 
         Args:
             action: Action payload dict (e.g., order, cancel, updateLeverage)
@@ -83,47 +82,17 @@ class HyperLiquidSigner:
             >>> print(sig)
             {'r': '0x...', 's': '0x...', 'v': 28}
         """
-        # Construct connection ID (not used in current implementation)
-        connection_id = bytes(32)  # 32 zero bytes
-
-        # Prepare typed data according to HyperLiquid's EIP-712 structure
-        typed_data = {
-            "types": {
-                "EIP712Domain": [
-                    {"name": "name", "type": "string"},
-                    {"name": "version", "type": "string"},
-                    {"name": "chainId", "type": "uint256"},
-                    {"name": "verifyingContract", "type": "address"}
-                ],
-                "Agent": [
-                    {"name": "source", "type": "string"},
-                    {"name": "connectionId", "type": "bytes32"}
-                ]
-            },
-            "primaryType": "Agent",
-            "domain": {
-                "name": self.DOMAIN_NAME,
-                "version": self.DOMAIN_VERSION,
-                "chainId": self.HYPERLIQUID_CHAIN_ID,
-                "verifyingContract": self.HYPERLIQUID_VERIFYING_CONTRACT
-            },
-            "message": {
-                "source": "a",  # "a" indicates API/agent source
-                "connectionId": f"0x{connection_id.hex()}"
-            }
-        }
-
-        # Encode and sign the typed data
         try:
-            encoded_data = encode_typed_data(full_message=typed_data)
-            signed_message = self.account.sign_message(encoded_data)
-
-            # Extract r, s, v components
-            signature = {
-                "r": f"0x{signed_message.r.to_bytes(32, 'big').hex()}",
-                "s": f"0x{signed_message.s.to_bytes(32, 'big').hex()}",
-                "v": signed_message.v
-            }
+            # Use official SDK signing function
+            # Parameters: wallet, action, vault_address, nonce, expires_after, is_mainnet
+            signature = hl_sign_l1_action(
+                self.account,
+                action,
+                vault_address,
+                nonce,
+                None,  # expires_after (not used)
+                True   # is_mainnet (testnet also uses "a" source)
+            )
 
             logger.debug(f"Signed action with nonce {nonce}")
             return signature
@@ -138,10 +107,10 @@ class HyperLiquidSigner:
         nonce: int,
         vault_address: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Sign a user-signed action (alternative signing method).
+        """Sign a user-signed action using official HyperLiquid SDK.
 
         This is an alternative signing method used by HyperLiquid for certain
-        operations. The main difference is in the typed data structure.
+        operations (e.g., withdrawals, transfers).
 
         Args:
             action: Action payload
@@ -151,9 +120,22 @@ class HyperLiquidSigner:
         Returns:
             Signature dict with r, s, v
         """
-        # For now, use the same implementation as sign_l1_action
-        # This may need to be adjusted based on actual API requirements
-        return self.sign_l1_action(action, nonce, vault_address)
+        try:
+            # Use official SDK signing function
+            signature = hl_sign_user_signed_action(
+                self.account,
+                action,
+                vault_address,
+                nonce,
+                True  # is_mainnet
+            )
+
+            logger.debug(f"Signed user-signed action with nonce {nonce}")
+            return signature
+
+        except Exception as e:
+            logger.error(f"Failed to sign user-signed action: {e}")
+            raise
 
     def verify_signature(
         self,

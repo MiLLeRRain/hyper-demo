@@ -1,7 +1,9 @@
 """HyperLiquid Exchange API executor.
 
-This module implements the executor for placing orders and managing
-positions on HyperLiquid exchange.
+This module wraps the official HyperLiquid Python SDK to provide
+trading execution with dry-run support.
+
+Official SDK: https://github.com/hyperliquid-dex/hyperliquid-python-sdk
 """
 
 import logging
@@ -9,10 +11,10 @@ import time
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
-from tenacity import retry, stop_after_attempt, wait_exponential
-
-from .hyperliquid_signer import HyperLiquidSigner
+from eth_account import Account
+from hyperliquid.exchange import Exchange
+from hyperliquid.info import Info
+from hyperliquid.utils import constants
 
 logger = logging.getLogger(__name__)
 
@@ -24,17 +26,16 @@ class OrderType:
 
 
 class HyperLiquidExecutor:
-    """Execute trades on HyperLiquid Exchange.
+    """Execute trades on HyperLiquid Exchange using official SDK.
 
-    This executor handles all trading operations including placing orders,
-    canceling orders, and managing leverage on HyperLiquid.
+    This executor wraps the official HyperLiquid Python SDK and adds
+    dry-run functionality for safe testing.
 
     Attributes:
-        base_url: Exchange API base URL
-        signer: HyperLiquidSigner instance for signing requests
-        vault_address: Optional vault/subaccount address
-        timeout: Request timeout in seconds
-        session: Requests session for connection pooling
+        exchange: Official HyperLiquid Exchange instance
+        info: Official HyperLiquid Info instance for market data
+        dry_run: Whether to simulate trades without executing
+        wallet_address: Wallet address derived from private key
     """
 
     def __init__(
@@ -46,108 +47,124 @@ class HyperLiquidExecutor:
         use_dynamic_assets: bool = True,
         dry_run: bool = False
     ):
-        """Initialize executor.
+        """Initialize executor with official HyperLiquid SDK.
 
         Args:
             base_url: Exchange API base URL (mainnet or testnet)
             private_key: Private key for signing transactions
             vault_address: Optional vault/subaccount address
             timeout: Request timeout in seconds
-            use_dynamic_assets: If True, load assets from API; if False, use hardcoded
-            dry_run: If True, simulate trades without executing (safe testing mode)
+            use_dynamic_assets: Compatibility parameter (always uses SDK's dynamic loading)
+            dry_run: If True, simulate trades without executing
 
         Example:
-            >>> # Real trading
+            >>> # Real trading on testnet
             >>> executor = HyperLiquidExecutor(
-            ...     "https://api.hyperliquid.xyz",
-            ...     "0xprivatekey"
+            ...     "https://api.hyperliquid-testnet.xyz",
+            ...     "0xprivatekey",
+            ...     dry_run=False
             ... )
             >>> # Dry-run mode (testing)
             >>> executor = HyperLiquidExecutor(
-            ...     "https://api.hyperliquid.xyz",
+            ...     "https://api.hyperliquid-testnet.xyz",
             ...     "0xprivatekey",
             ...     dry_run=True
             ... )
         """
         self.base_url = base_url.rstrip("/")
-        self.signer = HyperLiquidSigner(private_key)
-        self.vault_address = vault_address
-        self.timeout = timeout
         self.dry_run = dry_run
-        self.session = requests.Session()
-        self.session.headers.update({"Content-Type": "application/json"})
+        self.vault_address = vault_address
 
-        # Asset index mapping cache
-        self._asset_index_cache: Dict[str, int] = {}
-        self._use_dynamic_assets = use_dynamic_assets
+        # Create wallet from private key
+        if not private_key.startswith("0x"):
+            private_key = "0x" + private_key
+
+        self.wallet = Account.from_key(private_key)
+        self.wallet_address = self.wallet.address
+
+        # Initialize official SDK components
+        # Info API for market data (read-only)
+        self.info = Info(base_url, skip_ws=True)
+
+        # Exchange API for trading (if not dry-run)
+        if not dry_run:
+            self.exchange = Exchange(
+                wallet=self.wallet,
+                base_url=base_url,
+                vault_address=vault_address,
+                timeout=timeout
+            )
+        else:
+            self.exchange = None
 
         # Dry-run tracking
         self._dry_run_order_id_counter = 10000
         self._dry_run_orders: Dict[int, Dict[str, Any]] = {}
 
-        # Load asset indices if dynamic mode is enabled
-        if use_dynamic_assets:
-            try:
-                self._load_asset_indices()
-            except Exception as e:
-                logger.warning(
-                    f"Failed to load dynamic assets, falling back to hardcoded: {e}"
-                )
-                self._load_hardcoded_assets()
-        else:
-            self._load_hardcoded_assets()
-
         mode_str = "DRY-RUN MODE" if self.dry_run else "LIVE MODE"
         logger.info(
-            f"Initialized HyperLiquidExecutor for {self.signer.address} "
-            f"on {self.base_url} with {len(self._asset_index_cache)} assets [{mode_str}]"
+            f"Initialized HyperLiquidExecutor for {self.wallet_address} [{mode_str}]"
         )
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        reraise=True
-    )
-    def _post_signed(self, action: Dict[str, Any]) -> Dict[str, Any]:
-        """Make signed POST request to exchange API.
-
-        This method:
-        1. Generates a nonce (current timestamp)
-        2. Signs the action using EIP-712
-        3. Sends the signed request to the exchange
-        4. Handles errors and retries
-
-        Args:
-            action: Action payload to sign and send
+    def get_address(self) -> str:
+        """Get wallet address.
 
         Returns:
-            API response dict
-
-        Raises:
-            requests.RequestException: On API error after retries
+            Wallet address (checksum format)
         """
-        nonce = int(time.time() * 1000)  # milliseconds
-        signature = self.signer.sign_l1_action(action, nonce, self.vault_address)
+        return self.wallet_address
 
-        payload = {
-            "action": action,
-            "nonce": nonce,
-            "signature": signature,
-            "vaultAddress": self.vault_address
-        }
+    def get_supported_assets(self) -> List[str]:
+        """Get list of supported trading assets.
 
-        url = f"{self.base_url}/exchange"
+        Returns:
+            List of asset/coin symbols
+
+        Example:
+            >>> executor = HyperLiquidExecutor(...)
+            >>> assets = executor.get_supported_assets()
+            >>> print(assets[:5])
+            ['BTC', 'ETH', 'SOL', 'AVAX', 'MATIC']
+        """
         try:
-            response = self.session.post(url, json=payload, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
+            meta = self.info.meta()
+            universe = meta.get("universe", [])
+            return [asset["name"] for asset in universe]
+        except Exception as e:
+            logger.error(f"Failed to fetch supported assets: {e}")
+            # Return common assets as fallback
+            return ["BTC", "ETH", "SOL", "AVAX", "MATIC", "LINK", "UNI", "AAVE"]
 
-            logger.debug(f"Exchange API response: {data.get('status')}")
-            return data
+    def _round_price_to_tick(self, coin: str, price: float) -> float:
+        """Round price to valid tick size for the asset.
 
-        except requests.RequestException as e:
-            logger.error(f"Exchange API request failed: {e}")
-            raise
+        Args:
+            coin: Asset symbol
+            price: Price to round
+
+        Returns:
+            Price rounded to valid tick size
+
+        Note:
+            This uses a simplified tick size mapping. For most assets at typical
+            price ranges, this should work. For production, consider fetching
+            exact tick sizes from exchange metadata if available.
+        """
+        # Common tick sizes based on price ranges
+        # BTC, ETH use $10 tick at high prices
+        # Most altcoins use smaller ticks
+        if coin in ["BTC", "ETH"] and price > 1000:
+            tick = 10.0
+        elif price > 100:
+            tick = 1.0
+        elif price > 10:
+            tick = 0.1
+        elif price > 1:
+            tick = 0.01
+        else:
+            tick = 0.001
+
+        return round(price / tick) * tick
 
     def place_order(
         self,
@@ -163,64 +180,30 @@ class HyperLiquidExecutor:
         """Place an order on HyperLiquid.
 
         Args:
-            coin: Trading pair symbol (BTC, ETH, etc)
-            is_buy: True for buy order, False for sell order
+            coin: Asset symbol (e.g., "BTC", "ETH")
+            is_buy: True for buy, False for sell
             size: Order size in base currency
-            price: Limit price (None for market orders)
+            price: Limit price (required for limit orders)
             order_type: "limit" or "market"
             reduce_only: If True, order can only reduce position
-            time_in_force: "Gtc" (Good-til-Cancel), "Ioc" (Immediate-or-Cancel),
-                          or "Alo" (Add-Liquidity-Only)
-            client_order_id: Optional client-side order ID for tracking
+            time_in_force: "Gtc", "Ioc", or "Alo"
+            client_order_id: Optional client order ID
 
         Returns:
             Tuple of (success, order_id, error_message)
-            - success: True if order placed successfully
-            - order_id: Exchange order ID if successful
-            - error_message: Error description if failed
 
         Example:
-            >>> # Market buy order
-            >>> success, oid, err = executor.place_order(
-            ...     "BTC", True, Decimal("0.1"), order_type="market"
+            >>> success, oid, error = executor.place_order(
+            ...     "BTC", True, Decimal("0.01"), Decimal("50000"), "limit"
             ... )
-            >>> # Limit sell order
-            >>> success, oid, err = executor.place_order(
-            ...     "BTC", False, Decimal("0.1"), Decimal("51000")
-            ... )
+            >>> if success:
+            ...     print(f"Order placed: {oid}")
         """
-        # Get asset index (will be implemented in 3.1.3)
-        asset_index = self._get_asset_index(coin)
-
-        # Construct order
-        order = {
-            "a": asset_index,
-            "b": is_buy,
-            "s": str(size),
-            "r": reduce_only,
-        }
-
-        # Set order type and price
-        if order_type == OrderType.MARKET:
-            # Market order: IOC with extreme price
-            order["p"] = "1000000.0" if is_buy else "0.1"
-            order["t"] = {"limit": {"tif": "Ioc"}}
-        else:
-            if price is None:
-                raise ValueError("Limit orders require a price")
-            order["p"] = str(price)
-            order["t"] = {"limit": {"tif": time_in_force}}
-
-        # Add client order ID if provided
-        if client_order_id:
-            order["c"] = client_order_id
-
         # DRY-RUN MODE: Simulate order without executing
         if self.dry_run:
             self._dry_run_order_id_counter += 1
             order_id = self._dry_run_order_id_counter
 
-            # Store simulated order
             self._dry_run_orders[order_id] = {
                 "coin": coin,
                 "is_buy": is_buy,
@@ -238,44 +221,66 @@ class HyperLiquidExecutor:
             )
             return True, order_id, None
 
-        # LIVE MODE: Submit real order
-        action = {
-            "type": "order",
-            "orders": [order],
-            "grouping": "na"
-        }
-
+        # LIVE MODE: Use official SDK
         try:
-            response = self._post_signed(action)
-
-            if response.get("status") == "ok":
-                data = response["response"]["data"]
-                status = data["statuses"][0]
-
-                if "resting" in status:
-                    order_id = status["resting"]["oid"]
-                    logger.info(
-                        f"Order placed: {coin} {'BUY' if is_buy else 'SELL'} "
-                        f"{size} @ {price or 'MARKET'} (OID: {order_id})"
-                    )
-                    return True, order_id, None
-
-                elif "filled" in status:
-                    order_id = status["filled"]["oid"]
-                    logger.info(
-                        f"Order filled immediately: {coin} {'BUY' if is_buy else 'SELL'} "
-                        f"{size} (OID: {order_id})"
-                    )
-                    return True, order_id, None
-
-                else:
-                    error = status.get("error", "Unknown error")
-                    logger.error(f"Order rejected: {error}")
-                    return False, None, error
+            # Prepare order type parameter
+            if order_type == OrderType.MARKET:
+                order_type_param = {"limit": {"tif": "Ioc"}}
+                # For market orders, use extreme price
+                if price is None:
+                    price = Decimal("1000000") if is_buy else Decimal("0.1")
             else:
-                error = response.get("response", "API error")
-                logger.error(f"Order failed: {error}")
-                return False, None, str(error)
+                if price is None:
+                    return False, None, "Limit orders require a price"
+                order_type_param = {"limit": {"tif": time_in_force}}
+
+            # Round price to valid tick size
+            rounded_price = self._round_price_to_tick(coin, float(price))
+
+            # Place order using official SDK
+            result = self.exchange.order(
+                coin,
+                is_buy=is_buy,
+                sz=float(size),
+                limit_px=rounded_price,
+                order_type=order_type_param,
+                reduce_only=reduce_only,
+                cloid=client_order_id
+            )
+
+            # Parse result
+            if result and result.get("status") == "ok":
+                response_data = result.get("response", {}).get("data", {})
+                statuses = response_data.get("statuses", [])
+
+                if statuses:
+                    status = statuses[0]
+
+                    # Check if order was placed (resting) or filled immediately
+                    if "resting" in status:
+                        order_id = status["resting"]["oid"]
+                        logger.info(
+                            f"Order placed: {coin} {'BUY' if is_buy else 'SELL'} "
+                            f"{size} @ {price} (OID: {order_id})"
+                        )
+                        return True, order_id, None
+
+                    elif "filled" in status:
+                        order_id = status["filled"]["oid"]
+                        logger.info(
+                            f"Order filled immediately: {coin} {'BUY' if is_buy else 'SELL'} "
+                            f"{size} (OID: {order_id})"
+                        )
+                        return True, order_id, None
+
+                    else:
+                        error = status.get("error", "Unknown error")
+                        logger.error(f"Order rejected: {error}")
+                        return False, None, error
+
+            error_msg = result.get("response", "Unknown error") if result else "No response"
+            logger.error(f"Order failed: {error_msg}")
+            return False, None, str(error_msg)
 
         except Exception as e:
             logger.error(f"Order execution failed: {e}")
@@ -289,135 +294,41 @@ class HyperLiquidExecutor:
         """Cancel an order by order ID.
 
         Args:
-            coin: Trading pair symbol
+            coin: Asset symbol
             order_id: Order ID to cancel
 
         Returns:
             Tuple of (success, error_message)
 
         Example:
-            >>> success, err = executor.cancel_order("BTC", 12345)
+            >>> success, error = executor.cancel_order("BTC", 12345)
+            >>> if success:
+            ...     print("Order cancelled")
         """
-        # DRY-RUN MODE: Simulate cancel
+        # DRY-RUN MODE: Simulate cancellation
         if self.dry_run:
             if order_id in self._dry_run_orders:
                 self._dry_run_orders[order_id]["status"] = "cancelled"
-                logger.info(f"[DRY-RUN] Simulated cancel: {coin} OID {order_id}")
+                logger.info(f"[DRY-RUN] Cancelled order {order_id}")
                 return True, None
             else:
                 logger.warning(f"[DRY-RUN] Order {order_id} not found")
                 return False, "Order not found"
 
-        # LIVE MODE: Real cancel
-        asset_index = self._get_asset_index(coin)
-
-        action = {
-            "type": "cancel",
-            "cancels": [{
-                "a": asset_index,
-                "o": order_id
-            }]
-        }
-
+        # LIVE MODE: Use official SDK
         try:
-            response = self._post_signed(action)
+            result = self.exchange.cancel(coin, order_id)
 
-            if response.get("status") == "ok":
-                logger.info(f"Order cancelled: {coin} OID {order_id}")
+            if result and result.get("status") == "ok":
+                logger.info(f"Cancelled order {order_id} for {coin}")
                 return True, None
             else:
-                error = response.get("response", "Cancel failed")
-                logger.error(f"Cancel failed for OID {order_id}: {error}")
+                error = result.get("response", "Unknown error") if result else "No response"
+                logger.error(f"Cancel failed: {error}")
                 return False, str(error)
 
         except Exception as e:
-            logger.error(f"Cancel execution failed: {e}")
-            return False, str(e)
-
-    def cancel_by_cloid(
-        self,
-        coin: str,
-        client_order_id: str
-    ) -> Tuple[bool, Optional[str]]:
-        """Cancel an order by client order ID.
-
-        Args:
-            coin: Trading pair symbol
-            client_order_id: Client order ID
-
-        Returns:
-            Tuple of (success, error_message)
-
-        Example:
-            >>> success, err = executor.cancel_by_cloid("BTC", "my-order-123")
-        """
-        asset_index = self._get_asset_index(coin)
-
-        action = {
-            "type": "cancelByCloid",
-            "cancels": [{
-                "a": asset_index,
-                "cloid": client_order_id
-            }]
-        }
-
-        try:
-            response = self._post_signed(action)
-
-            if response.get("status") == "ok":
-                logger.info(f"Order cancelled by CLOID: {coin} {client_order_id}")
-                return True, None
-            else:
-                error = response.get("response", "Cancel failed")
-                logger.error(f"Cancel by CLOID failed: {error}")
-                return False, str(error)
-
-        except Exception as e:
-            logger.error(f"Cancel by CLOID failed: {e}")
-            return False, str(e)
-
-    def batch_cancel(
-        self,
-        cancels: List[Tuple[str, int]]
-    ) -> Tuple[bool, Optional[str]]:
-        """Cancel multiple orders at once.
-
-        Args:
-            cancels: List of (coin, order_id) tuples
-
-        Returns:
-            Tuple of (success, error_message)
-
-        Example:
-            >>> cancels = [("BTC", 12345), ("ETH", 67890)]
-            >>> success, err = executor.batch_cancel(cancels)
-        """
-        cancel_list = []
-        for coin, order_id in cancels:
-            asset_index = self._get_asset_index(coin)
-            cancel_list.append({
-                "a": asset_index,
-                "o": order_id
-            })
-
-        action = {
-            "type": "cancel",
-            "cancels": cancel_list
-        }
-
-        try:
-            response = self._post_signed(action)
-
-            if response.get("status") == "ok":
-                logger.info(f"Batch cancelled {len(cancels)} orders")
-                return True, None
-            else:
-                error = response.get("response", "Batch cancel failed")
-                logger.error(f"Batch cancel failed: {error}")
-                return False, str(error)
-
-        except Exception as e:
-            logger.error(f"Batch cancel failed: {e}")
+            logger.error(f"Cancel order failed: {e}")
             return False, str(e)
 
     def update_leverage(
@@ -429,48 +340,44 @@ class HyperLiquidExecutor:
         """Update leverage for an asset.
 
         Args:
-            coin: Trading pair symbol
-            leverage: Leverage value (1-50x, depending on asset)
-            is_cross: True for cross margin, False for isolated margin
+            coin: Asset symbol
+            leverage: Leverage multiplier (1-50)
+            is_cross: True for cross margin, False for isolated
 
         Returns:
             Tuple of (success, error_message)
 
         Example:
-            >>> # Set BTC to 10x cross margin
-            >>> success, err = executor.update_leverage("BTC", 10, True)
+            >>> success, error = executor.update_leverage("BTC", 5, True)
+            >>> if success:
+            ...     print("Leverage updated to 5x cross margin")
         """
-        asset_index = self._get_asset_index(coin)
-
         # Validate leverage
-        if leverage < 1 or leverage > 50:
-            return False, f"Invalid leverage {leverage}x (must be 1-50x)"
+        if not (1 <= leverage <= 50):
+            error = f"Invalid leverage {leverage}x (must be 1-50x)"
+            logger.error(error)
+            return False, error
 
         # DRY-RUN MODE: Simulate leverage update
         if self.dry_run:
-            mode = "cross" if is_cross else "isolated"
             logger.info(
-                f"[DRY-RUN] Simulated leverage update: {coin} -> {leverage}x ({mode})"
+                f"[DRY-RUN] Updated leverage for {coin}: {leverage}x "
+                f"({'cross' if is_cross else 'isolated'})"
             )
             return True, None
 
-        # LIVE MODE: Real leverage update
-        action = {
-            "type": "updateLeverage",
-            "asset": asset_index,
-            "isCross": is_cross,
-            "leverage": leverage
-        }
-
+        # LIVE MODE: Use official SDK
         try:
-            response = self._post_signed(action)
+            result = self.exchange.update_leverage(leverage, coin, is_cross)
 
-            if response.get("status") == "ok":
-                mode = "cross" if is_cross else "isolated"
-                logger.info(f"Leverage updated: {coin} -> {leverage}x ({mode})")
+            if result and result.get("status") == "ok":
+                logger.info(
+                    f"Updated leverage for {coin}: {leverage}x "
+                    f"({'cross' if is_cross else 'isolated'})"
+                )
                 return True, None
             else:
-                error = response.get("response", "Leverage update failed")
+                error = result.get("response", "Unknown error") if result else "No response"
                 logger.error(f"Leverage update failed: {error}")
                 return False, str(error)
 
@@ -478,194 +385,7 @@ class HyperLiquidExecutor:
             logger.error(f"Leverage update failed: {e}")
             return False, str(e)
 
-    def modify_order(
-        self,
-        coin: str,
-        order_id: int,
-        new_size: Decimal,
-        new_price: Decimal,
-        is_buy: bool,
-        reduce_only: bool = False,
-        time_in_force: str = "Gtc"
-    ) -> Tuple[bool, Optional[str]]:
-        """Modify an existing order.
-
-        Args:
-            coin: Trading pair symbol
-            order_id: Order ID to modify
-            new_size: New order size
-            new_price: New limit price
-            is_buy: True for buy, False for sell
-            reduce_only: Reduce-only flag
-            time_in_force: Time in force
-
-        Returns:
-            Tuple of (success, error_message)
-
-        Example:
-            >>> success, err = executor.modify_order(
-            ...     "BTC", 12345, Decimal("0.15"), Decimal("51000"), True
-            ... )
-        """
-        asset_index = self._get_asset_index(coin)
-
-        action = {
-            "type": "modify",
-            "oid": order_id,
-            "order": {
-                "a": asset_index,
-                "b": is_buy,
-                "p": str(new_price),
-                "s": str(new_size),
-                "r": reduce_only,
-                "t": {"limit": {"tif": time_in_force}}
-            }
-        }
-
-        try:
-            response = self._post_signed(action)
-
-            if response.get("status") == "ok":
-                logger.info(f"Order modified: {coin} OID {order_id}")
-                return True, None
-            else:
-                error = response.get("response", "Modify failed")
-                logger.error(f"Modify failed for OID {order_id}: {error}")
-                return False, str(error)
-
-        except Exception as e:
-            logger.error(f"Modify failed: {e}")
-            return False, str(e)
-
-    def _load_asset_indices(self):
-        """Load asset indices from HyperLiquid meta API.
-
-        Fetches the complete list of available assets and builds
-        a mapping from coin symbol to asset index.
-
-        Raises:
-            Exception: If API call fails
-        """
-        payload = {"type": "meta"}
-        url = f"{self.base_url}/info"
-
-        try:
-            response = self.session.post(url, json=payload, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
-
-            # Build asset index cache from universe
-            universe = data.get("universe", [])
-            for index, asset in enumerate(universe):
-                coin = asset.get("name")
-                if coin:
-                    self._asset_index_cache[coin] = index
-
-            logger.info(f"Loaded {len(self._asset_index_cache)} assets from API")
-
-        except Exception as e:
-            logger.error(f"Failed to load assets from API: {e}")
-            raise
-
-    def _load_hardcoded_assets(self):
-        """Load hardcoded asset indices as fallback.
-
-        This is used when dynamic loading fails or is disabled.
-        The mapping is based on common top assets.
-        """
-        self._asset_index_cache = {
-            "BTC": 0,
-            "ETH": 1,
-            "SOL": 2,
-            "XRP": 3,
-            "DOGE": 4,
-            "BNB": 5,
-            "ADA": 6,
-            "AVAX": 7,
-            "MATIC": 8,
-            "LINK": 9
-        }
-        logger.info(
-            f"Loaded {len(self._asset_index_cache)} hardcoded assets"
-        )
-
-    def _get_asset_index(self, coin: str) -> int:
-        """Get asset index for coin symbol.
-
-        Args:
-            coin: Coin symbol (BTC, ETH, etc)
-
-        Returns:
-            Asset index
-
-        Raises:
-            ValueError: If coin is not supported
-        """
-        if coin not in self._asset_index_cache:
-            # Try to refresh asset cache if in dynamic mode
-            if self._use_dynamic_assets:
-                try:
-                    logger.info(f"Asset {coin} not in cache, refreshing...")
-                    self._load_asset_indices()
-                except Exception as e:
-                    logger.warning(f"Failed to refresh assets: {e}")
-
-            # Check again after refresh
-            if coin not in self._asset_index_cache:
-                available = ", ".join(sorted(self._asset_index_cache.keys())[:10])
-                raise ValueError(
-                    f"Unsupported coin: {coin}. "
-                    f"Available assets (first 10): {available}..."
-                )
-
-        return self._asset_index_cache[coin]
-
-    def refresh_assets(self):
-        """Manually refresh the asset index cache from API.
-
-        This can be called periodically to ensure the cache is up-to-date
-        with any new assets added to the exchange.
-
-        Raises:
-            Exception: If API call fails and use_dynamic_assets is True
-        """
-        if self._use_dynamic_assets:
-            self._load_asset_indices()
-        else:
-            logger.warning("Asset refresh ignored: dynamic assets disabled")
-
-    def get_supported_assets(self) -> List[str]:
-        """Get list of currently supported asset symbols.
-
-        Returns:
-            List of coin symbols
-        """
-        return sorted(self._asset_index_cache.keys())
-
-    def get_address(self) -> str:
-        """Get the wallet address used by this executor.
-
-        Returns:
-            Ethereum address
-        """
-        return self.signer.address
-
-    def close(self):
-        """Close the executor and cleanup resources."""
-        self.session.close()
-        logger.info("HyperLiquidExecutor closed")
-
-    def __enter__(self):
-        """Context manager entry."""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.close()
-
     def __repr__(self) -> str:
         """String representation."""
-        return (
-            f"<HyperLiquidExecutor(address='{self.signer.address}', "
-            f"url='{self.base_url}')>"
-        )
+        mode = "DRY-RUN" if self.dry_run else "LIVE"
+        return f"HyperLiquidExecutor({self.wallet_address}, mode={mode})"

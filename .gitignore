@@ -62,3 +62,10 @@ config.yaml
 
 # Nul files
 nul
+
+# Test coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/

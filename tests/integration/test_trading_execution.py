@@ -300,30 +300,31 @@ class TestTradingExecutionDryRun:
         print(f"   Average: {duration/10*1000:.2f}ms per order")
 
     def test_unsupported_asset_handling(self, test_config):
-        """Test handling of unsupported asset in dry-run mode."""
+        """Test handling of unsupported asset in dry-run mode.
+
+        Note: With official SDK integration, the executor no longer validates
+        coin symbols upfront. The exchange will reject invalid symbols when
+        the order is placed. In dry-run mode, we simulate success for any coin.
+        """
         executor = HyperLiquidExecutor(
             base_url=test_config["hyperliquid"]["base_url"],
             private_key=test_config["hyperliquid"]["private_key"],
-            dry_run=True,
-            use_dynamic_assets=False  # Use hardcoded assets
+            dry_run=True
         )
 
-        # Try to place order for unsupported coin
-        try:
-            success, order_id, error = executor.place_order(
-                coin="UNSUPPORTED",
-                is_buy=True,
-                size=Decimal("0.1"),
-                price=Decimal("100.0")
-            )
+        # In dry-run mode, unsupported coins are simulated as successful
+        success, order_id, error = executor.place_order(
+            coin="UNSUPPORTED",
+            is_buy=True,
+            size=Decimal("0.1"),
+            price=Decimal("100.0")
+        )
 
-            # Should fail with ValueError
-            assert False, "Should have raised ValueError for unsupported coin"
-
-        except ValueError as e:
-            assert "Unsupported coin" in str(e)
-            print(f"\n[OK] [DRY-RUN] Correctly rejected unsupported asset")
-            print(f"   Error: {str(e)}")
+        # Dry-run mode accepts any coin (for testing flexibility)
+        assert success is True
+        assert order_id is not None
+        print(f"\n[OK] [DRY-RUN] Accepted unsupported asset in dry-run mode")
+        print(f"   Note: Live mode would reject this at the exchange level")
 
     def test_get_supported_assets(self, test_config):
         """Test getting list of supported assets."""

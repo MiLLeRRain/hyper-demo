@@ -1,0 +1,39 @@
+C:\Users\lh_ha\AppData\Roaming\Python\Python313\site-packages\eth_utils\network.py:40: UserWarning: Network 345 with name 'Yooldo Verse Mainnet' does not have a valid ChainId. eth-typing should be updated with the latest networks.
+  warnings.warn(
+C:\Users\lh_ha\AppData\Roaming\Python\Python313\site-packages\eth_utils\network.py:40: UserWarning: Network 12611 with name 'Astar zkEVM' does not have a valid ChainId. eth-typing should be updated with the latest networks.
+  warnings.warn(
+
+======================================================================
+  LLM API Integration Test (Testnet)
+======================================================================
+
+[!] This test will:
+  1. Call real LLM API (DeepSeek/OpenAI)
+  2. Execute real orders on Testnet
+  3. Use test tokens (no value)
+
+[OK] LLM API available:
+  - DeepSeek API OK
+
+  Continue with LLM integration test? (yes/no): Traceback (most recent call last):
+  File "D:\trae_projs\hyper-demo\tests\testnet\test_llm_integration.py", line 123, in main
+    candles = client.get_candles(coin, "15m", limit=50)
+              ^^^^^^^^^^^^^^^^^^
+AttributeError: 'HyperliquidClient' object has no attribute 'get_candles'
+
+======================================================================
+  Step 1: Initialize Components
+======================================================================
+  [OK] HyperliquidClient initialized
+  [OK] Executor initialized (Testnet)
+       Wallet: 0xYOUR_WALLET_ADDRESS_HERE
+  [OK] AI components initialized
+
+======================================================================
+  Step 2: Collect Market Data
+======================================================================
+
+  Collecting data for BTC...
+  Current Price: $96,075.00
+
+[ERROR] Test failed: 'HyperliquidClient' object has no attribute 'get_candles'
