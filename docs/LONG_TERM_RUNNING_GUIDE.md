@@ -84,7 +84,7 @@ HYPERLIQUID_INFO_URL=https://api.hyperliquid-testnet.xyz/info
 HYPERLIQUID_EXCHANGE_URL=https://api.hyperliquid-testnet.xyz
 
 # LLM API (DeepSeek 推荐)
-DEEPSEEK_API_KEY=sk-YOUR_DEEPSEEK_API_KEY_HERE
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
 
 # 数据库配置
 DB_USER=trading_bot

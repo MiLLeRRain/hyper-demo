@@ -58,7 +58,8 @@
       "Bash(done)",
       "Bash(ls:*)",
       "Bash(find:*)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Bash(iconv:*)"
     ],
     "deny": [],
     "ask": []

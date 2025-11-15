@@ -1,0 +1,319 @@
+# Multi-Agent Configuration with Strategy-Based System Prompts
+# 基于策略的多 Agent 配置（正确方式）
+
+# ============================================================================
+# 核心思想：
+# - 所有 Agent 使用相同的 temperature (0.7)
+# - 通过不同的系统提示词（System Prompt）来定义交易策略
+# ============================================================================
+
+environment: 'testnet'
+
+# ============================================================================
+# HYPERLIQUID CONFIGURATION
+# ============================================================================
+hyperliquid:
+  mainnet_url: 'https://api.hyperliquid.xyz'
+  testnet_url: 'https://api.hyperliquid-testnet.xyz'
+  private_key: '${HYPERLIQUID_PRIVATE_KEY}'
+  vault_address: null
+  timeout: 10
+  max_retries: 3
+  retry_delay: 2
+  max_position_size: 1.0
+  max_leverage: 5
+  max_daily_trades: 50
+
+# ============================================================================
+# LLM CONFIGURATION
+# ============================================================================
+llm:
+  models:
+    deepseek-chat:
+      provider: 'official'
+      official:
+        base_url: 'https://api.deepseek.com/v1'
+        api_key: '${DEEPSEEK_API_KEY}'
+        model_name: 'deepseek-chat'
+        timeout: 30
+        pricing:
+          input: '$0.27/1M tokens'
+          output: '$1.10/1M tokens'
+
+  # 统一参数（所有 Agent 一致）
+  max_tokens: 500
+  temperature: 0.7    # 固定 temperature，不用于控制策略
+
+# ============================================================================
+# TRADING CONFIGURATION
+# ============================================================================
+trading:
+  interval_minutes: 3
+  coins: ['BTC', 'ETH', 'SOL']
+  kline_limit_3m: 30
+  kline_limit_4h: 24
+  max_position_per_agent: 0.5
+  stop_loss_percentage: 5.0
+  take_profit_percentage: 10.0
+
+# ============================================================================
+# AI AGENTS CONFIGURATION - 基于策略的配置
+# ============================================================================
+agents:
+  # ========================================================================
+  # Agent 1: 趋势跟踪策略 (Trend Following)
+  # ========================================================================
+  - name: 'Trend Following Agent'
+    enabled: true
+    provider: 'deepseek'
+    model: 'deepseek-chat'
+    temperature: 0.7        # 统一 temperature
+    max_tokens: 500
+
+    # 策略描述（这才是关键！）
+    strategy_description: |
+      You are a TREND FOLLOWING trader. Your core principles:
+
+      1. Trading Philosophy:
+         - Only trade in the direction of the strong trends
+         - Wait for clear trend confirmation before entering
+         - Ride trends as long as they remain intact
+         - Cut losses quickly when trend reverses
+
+      2. Entry Rules:
+         - LONG: Price above both SMA(20) and SMA(50), MACD bullish crossover, RSI > 50
+         - SHORT: Price below both SMA(20) and SMA(50), MACD bearish crossover, RSI < 50
+         - HOLD: No clear trend or conflicting signals
+
+      3. Risk Management:
+         - Position size: 30-50% of account (trend is your friend)
+         - Stop loss: Below recent swing low (LONG) or above swing high (SHORT)
+         - Take profit: Let profits run until trend reversal signals
+         - Leverage: 2-3x maximum
+
+      4. Key Indicators Priority:
+         - SMA crossovers (most important)
+         - MACD trend confirmation
+         - RSI for momentum
+         - ATR for stop loss placement
+
+  # ========================================================================
+  # Agent 2: 均值回归策略 (Mean Reversion)
+  # ========================================================================
+  - name: 'Mean Reversion Agent'
+    enabled: true
+    provider: 'deepseek'
+    model: 'deepseek-chat'
+    temperature: 0.7        # 统一 temperature
+    max_tokens: 500
+
+    strategy_description: |
+      You are a MEAN REVERSION trader. Your core principles:
+
+      1. Trading Philosophy:
+         - Trade against short-term extremes
+         - Buy oversold conditions, sell overbought conditions
+         - Profit from market overreactions
+         - Take quick profits when price returns to mean
+
+      2. Entry Rules:
+         - LONG: RSI < 30 (oversold), price 5%+ below SMA(20), volume spike
+         - SHORT: RSI > 70 (overbought), price 5%+ above SMA(20), volume spike
+         - HOLD: RSI between 30-70 (normal range)
+
+      3. Risk Management:
+         - Position size: 20-30% of account (conservative)
+         - Stop loss: Tight stops (2-3% from entry)
+         - Take profit: Quick exits when price returns to SMA(20)
+         - Leverage: 1-2x maximum (lower risk)
+
+      4. Key Indicators Priority:
+         - RSI extremes (most important)
+         - Distance from SMA(20)
+         - Volume spikes
+         - Support/resistance levels
+
+  # ========================================================================
+  # Agent 3: 动量突破策略 (Momentum Breakout)
+  # ========================================================================
+  - name: 'Momentum Breakout Agent'
+    enabled: true
+    provider: 'deepseek'
+    model: 'deepseek-chat'
+    temperature: 0.7        # 统一 temperature
+    max_tokens: 500
+
+    strategy_description: |
+      You are a MOMENTUM BREAKOUT trader. Your core principles:
+
+      1. Trading Philosophy:
+         - Trade explosive price movements
+         - Enter on confirmed breakouts with volume
+         - Capture large moves in short time
+         - Exit quickly if breakout fails
+
+      2. Entry Rules:
+         - LONG: Price breaks above recent high, volume > 2x average, RSI > 60, MACD positive
+         - SHORT: Price breaks below recent low, volume > 2x average, RSI < 40, MACD negative
+         - HOLD: No breakout setup or low volume
+
+      3. Risk Management:
+         - Position size: 40-60% of account (aggressive on confirmed signals)
+         - Stop loss: Just below breakout level (2-4%)
+         - Take profit: Trail stop, exit on momentum loss
+         - Leverage: 3-5x on strong setups
+
+      4. Key Indicators Priority:
+         - Volume confirmation (critical!)
+         - Price breakout level
+         - MACD acceleration
+         - RSI momentum
+
+  # ========================================================================
+  # Agent 4: 保守持仓策略 (Conservative Holder) - 可选
+  # ========================================================================
+  - name: 'Conservative Holder'
+    enabled: false          # 默认关闭，可按需启用
+    provider: 'deepseek'
+    model: 'deepseek-chat'
+    temperature: 0.7
+    max_tokens: 500
+
+    strategy_description: |
+      You are a CONSERVATIVE long-term position trader. Your core principles:
+
+      1. Trading Philosophy:
+         - Only enter high-probability setups
+         - Hold positions for extended periods
+         - Avoid overtrading
+         - Prioritize capital preservation
+
+      2. Entry Rules:
+         - LONG: Multiple indicators align (SMA golden cross, MACD bullish, RSI 40-60, strong support)
+         - SHORT: Rarely take shorts, only on major bearish confirmations
+         - HOLD: Default position when not highly confident
+
+      3. Risk Management:
+         - Position size: 10-20% of account (very conservative)
+         - Stop loss: Wide stops (5-8%) to avoid noise
+         - Take profit: 10-15% gains, or hold until major reversal
+         - Leverage: 1x maximum (no leverage unless very confident)
+
+      4. Confidence Requirements:
+         - Only trade when confidence > 0.75
+         - Require 3+ indicator confirmations
+         - Avoid trades during high volatility
+
+# ============================================================================
+# DATABASE CONFIGURATION
+# ============================================================================
+database:
+  url: 'postgresql://${DB_USER}:${DB_PASSWORD}@localhost:5432/trading_bot'
+  pool_size: 10
+  max_overflow: 20
+  pool_timeout: 30
+  pool_recycle: 3600
+
+# ============================================================================
+# MONITORING & ALERTS
+# ============================================================================
+monitoring:
+  performance:
+    enabled: true
+    track_cycle_time: true
+    track_api_latency: true
+    track_agent_performance: true
+
+  account:
+    enabled: true
+    check_balance: true
+    check_liquidation_risk: true
+    min_balance_alert: 100.0
+
+  alerts:
+    console: true
+    log_file: true
+
+# ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
+logging:
+  level: 'INFO'
+  log_dir: 'logs'
+  main_log: 'logs/trading_bot.log'
+  error_log: 'logs/trading_bot_error.log'
+  agent_decisions_log: 'logs/agent_decisions.log'
+  rotation: '1 day'
+  retention: '30 days'
+
+# ============================================================================
+# ENVIRONMENT-SPECIFIC OVERRIDES
+# ============================================================================
+environments:
+  testnet:
+    dry_run:
+      enabled: false
+    hyperliquid:
+      active_url: 'testnet_url'
+    logging:
+      level: 'INFO'
+
+  mainnet:
+    dry_run:
+      enabled: false
+    hyperliquid:
+      active_url: 'mainnet_url'
+    logging:
+      level: 'WARNING'
+
+# ============================================================================
+# 预期效果：
+# ============================================================================
+#
+# 每个 Agent 将根据自己的策略描述做出不同的决策：
+#
+# 同样的市场数据 (BTC @ $96,000):
+# - SMA(20): $95,500
+# - SMA(50): $94,000
+# - RSI: 65
+# - MACD: 正值，向上
+# - 成交量: 正常
+#
+# Agent 决策：
+# ├─ Trend Following:    BUY  (明确的上升趋势，SMA多头排列)
+# ├─ Mean Reversion:     HOLD (RSI 65，未达到超买阈值 70)
+# └─ Momentum Breakout:  HOLD (无突破信号，成交量不足)
+#
+# 最终执行：基于投票或加权策略
+# ============================================================================
+
+# ============================================================================
+# 对比错误方式（仅用 temperature）：
+# ============================================================================
+#
+# ❌ 错误方式：
+# agents:
+#   - name: 'Agent 1'
+#     temperature: 0.3    # 希望更保守
+#   - name: 'Agent 2'
+#     temperature: 0.9    # 希望更激进
+#
+# 问题：
+# - Temperature 只影响输出的随机性，不影响策略逻辑
+# - 所有 Agent 看到相同的系统提示词
+# - 无法真正实现不同的交易策略
+#
+# ✅ 正确方式：
+# agents:
+#   - name: 'Trend Follower'
+#     temperature: 0.7
+#     strategy_description: "You follow trends..."
+#   - name: 'Mean Reverter'
+#     temperature: 0.7
+#     strategy_description: "You trade reversions..."
+#
+# 优势：
+# - 明确定义不同的交易哲学和规则
+# - Agent 理解并遵循特定策略
+# - 可以对比不同策略的表现
+# ============================================================================

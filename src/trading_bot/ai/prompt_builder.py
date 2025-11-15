@@ -59,7 +59,7 @@ class PromptBuilder:
             Complete prompt string (~11k characters)
         """
         sections = [
-            self._build_header(),
+            self._build_header(agent),
             self._build_portfolio_section(account, positions),
             self._build_market_data_section(market_data),
             self._build_constraints_section(agent),
@@ -76,17 +76,31 @@ class PromptBuilder:
 
         return prompt
 
-    def _build_header(self) -> str:
-        """Build the header section with current time and system role."""
+    def _build_header(self, agent: TradingAgent) -> str:
+        """Build the header section with current time and agent-specific system role.
+
+        Args:
+            agent: Trading agent configuration (includes strategy description)
+
+        Returns:
+            Header section string with personalized system prompt
+        """
         current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
-        return f"""# HyperLiquid AI Trading System
+        # Base system prompt
+        base_prompt = f"""# HyperLiquid AI Trading System
 Current Time: {current_time}
 
 You are an advanced AI trading agent operating on HyperLiquid DEX, a high-performance decentralized perpetual futures exchange.
 
 Your goal is to maximize portfolio returns while managing risk through strategic perpetual futures trading decisions.
 You have access to real-time market data, technical indicators, and your current portfolio state."""
+
+        # Add agent-specific strategy description if available
+        if agent.strategy_description:
+            base_prompt += f"\n\n**Your Trading Strategy:**\n{agent.strategy_description}"
+
+        return base_prompt
 
     def _build_portfolio_section(
         self,

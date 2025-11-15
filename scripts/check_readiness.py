@@ -206,45 +206,33 @@ def check_hyperliquid_api():
             print_error(f"Info API returned status {response.status_code}")
             return False
 
-        # Test wallet balance
+        # Test wallet address derivation
         private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY")
         if private_key:
-            print_info("Checking wallet balance...")
+            print_info("Checking wallet address...")
 
-            from trading_bot.trading.hyperliquid_signer import HyperliquidSigner
-            from trading_bot.data.hyperliquid_client import HyperliquidClient
+            try:
+                # Derive wallet address from private key
+                from eth_account import Account
 
-            signer = HyperliquidSigner(private_key)
-            wallet = signer.get_address()
+                # Normalize private key
+                if not private_key.startswith("0x"):
+                    private_key = "0x" + private_key
 
-            client = HyperliquidClient(base_url=testnet_url)
+                # Ensure proper length (64 hex chars + 0x prefix = 66 total)
+                if len(private_key) < 66:
+                    private_key = "0x" + private_key[2:].zfill(64)
 
-            # Get account state
-            account_response = requests.post(
-                testnet_url,
-                json={
-                    "type": "clearinghouseState",
-                    "user": wallet
-                },
-                timeout=10
-            )
+                account = Account.from_key(private_key)
+                wallet = account.address
 
-            if account_response.status_code == 200:
-                account_data = account_response.json()
-                if account_data and "marginSummary" in account_data:
-                    balance = float(account_data["marginSummary"]["accountValue"])
-                    print_success(f"Wallet: {wallet}")
-                    print_success(f"Balance: ${balance:,.2f} USDC")
+                print_success(f"Wallet: {wallet}")
+                print_info("To check balance and get faucet:")
+                print_info("  Visit: https://app.hyperliquid-testnet.xyz/")
 
-                    if balance < 10:
-                        print_warning("Low balance! Visit https://app.hyperliquid-testnet.xyz/ to get faucet")
-                else:
-                    print_warning("Wallet not activated or has no balance")
-                    print_info("Visit: https://app.hyperliquid-testnet.xyz/")
-                    print_info("1. Connect wallet")
-                    print_info("2. Get testnet faucet")
-            else:
-                print_warning("Could not fetch wallet balance")
+            except Exception as e:
+                print_error(f"Failed to derive wallet address: {e}")
+                print_info("Check your HYPERLIQUID_PRIVATE_KEY in .env")
 
         return True
 
