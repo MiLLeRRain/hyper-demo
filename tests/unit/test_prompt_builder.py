@@ -202,14 +202,16 @@ class TestPromptBuilder:
         assert "Risk Management Constraints" in prompt
         assert "Your Task" in prompt
 
-    def test_build_header_section(self, builder):
+    def test_build_header_section(self, builder, mock_agent):
         """Test _build_header creates proper header."""
-        header = builder._build_header()
+        header = builder._build_header(mock_agent)
 
         assert "HyperLiquid AI Trading System" in header
         assert "Current Time:" in header
         assert "UTC" in header
         assert "trading agent" in header.lower()
+        # Should include strategy description
+        assert "Follow technical indicators" in header
 
     def test_build_portfolio_section_with_positions(
         self,

@@ -27,16 +27,14 @@ class TestHyperLiquidExecutor:
 
     @pytest.fixture
     def executor(self, mock_signer):
-        """Create executor with mocked signer and session."""
-        with patch('src.trading_bot.trading.hyperliquid_executor.HyperLiquidSigner') as MockSigner:
-            MockSigner.return_value = mock_signer
-            with patch('src.trading_bot.trading.hyperliquid_executor.requests.Session') as MockSession:
-                mock_session = Mock()
-                MockSession.return_value = mock_session
+        """Create executor with mocked SDK components."""
+        with patch('src.trading_bot.trading.hyperliquid_executor.Exchange') as MockExchange:
+            with patch('src.trading_bot.trading.hyperliquid_executor.Info') as MockInfo:
                 executor = HyperLiquidExecutor(
                     base_url="https://api.hyperliquid-testnet.xyz",
                     private_key="0x" + "1" * 64,
-                    use_dynamic_assets=False  # Use hardcoded assets for testing
+                    use_dynamic_assets=False,  # Use hardcoded assets for testing
+                    dry_run=True  # Use dry-run mode for testing
                 )
                 return executor
 
@@ -50,17 +48,15 @@ class TestHyperLiquidExecutor:
 
     def test_initialize_with_vault(self, mock_signer):
         """Test initialization with vault address."""
-        with patch('src.trading_bot.trading.hyperliquid_executor.HyperLiquidSigner') as MockSigner:
-            MockSigner.return_value = mock_signer
-            with patch('src.trading_bot.trading.hyperliquid_executor.requests.Session') as MockSession:
-                mock_session = Mock()
-                MockSession.return_value = mock_session
+        with patch('src.trading_bot.trading.hyperliquid_executor.Exchange') as MockExchange:
+            with patch('src.trading_bot.trading.hyperliquid_executor.Info') as MockInfo:
                 vault = "0x" + "2" * 40
                 executor = HyperLiquidExecutor(
                     base_url="https://api.hyperliquid-testnet.xyz",
                     private_key="0x" + "1" * 64,
                     vault_address=vault,
-                    use_dynamic_assets=False
+                    use_dynamic_assets=False,
+                    dry_run=True
                 )
                 assert executor.vault_address == vault
 
@@ -459,15 +455,11 @@ class TestHyperLiquidExecutor:
 
     def test_dynamic_asset_loading(self, mock_signer):
         """Test dynamic asset loading from API."""
-        with patch('src.trading_bot.trading.hyperliquid_executor.HyperLiquidSigner') as MockSigner:
-            MockSigner.return_value = mock_signer
-            with patch('src.trading_bot.trading.hyperliquid_executor.requests.Session') as MockSession:
-                mock_session = Mock()
-
-                # Mock meta API response
-                mock_meta_response = Mock()
-                mock_meta_response.status_code = 200
-                mock_meta_response.json.return_value = {
+        with patch('src.trading_bot.trading.hyperliquid_executor.Exchange') as MockExchange:
+            with patch('src.trading_bot.trading.hyperliquid_executor.Info') as MockInfo:
+                # Mock Info.meta() response
+                mock_info = MockInfo.return_value
+                mock_info.meta.return_value = {
                     "universe": [
                         {"name": "BTC"},
                         {"name": "ETH"},
@@ -475,13 +467,12 @@ class TestHyperLiquidExecutor:
                         {"name": "TEST_COIN"}
                     ]
                 }
-                mock_session.post.return_value = mock_meta_response
-                MockSession.return_value = mock_session
 
                 executor = HyperLiquidExecutor(
                     base_url="https://api.hyperliquid-testnet.xyz",
                     private_key="0x" + "1" * 64,
-                    use_dynamic_assets=True
+                    use_dynamic_assets=True,
+                    dry_run=True
                 )
 
                 # Verify dynamic assets were loaded
@@ -491,19 +482,17 @@ class TestHyperLiquidExecutor:
 
     def test_dynamic_asset_fallback_on_error(self, mock_signer):
         """Test fallback to hardcoded assets when API fails."""
-        with patch('src.trading_bot.trading.hyperliquid_executor.HyperLiquidSigner') as MockSigner:
-            MockSigner.return_value = mock_signer
-            with patch('src.trading_bot.trading.hyperliquid_executor.requests.Session') as MockSession:
-                mock_session = Mock()
-
-                # Mock API failure
-                mock_session.post.side_effect = Exception("API error")
-                MockSession.return_value = mock_session
+        with patch('src.trading_bot.trading.hyperliquid_executor.Exchange') as MockExchange:
+            with patch('src.trading_bot.trading.hyperliquid_executor.Info') as MockInfo:
+                # Mock Info.meta() failure
+                mock_info = MockInfo.return_value
+                mock_info.meta.side_effect = Exception("API error")
 
                 executor = HyperLiquidExecutor(
                     base_url="https://api.hyperliquid-testnet.xyz",
                     private_key="0x" + "1" * 64,
-                    use_dynamic_assets=True
+                    use_dynamic_assets=True,
+                    dry_run=True
                 )
 
                 # Should have fallen back to hardcoded assets
@@ -518,32 +507,28 @@ class TestHyperLiquidExecutor:
 
     def test_refresh_assets_dynamic_mode(self, mock_signer):
         """Test refreshing assets in dynamic mode."""
-        with patch('src.trading_bot.trading.hyperliquid_executor.HyperLiquidSigner') as MockSigner:
-            MockSigner.return_value = mock_signer
-            with patch('src.trading_bot.trading.hyperliquid_executor.requests.Session') as MockSession:
-                mock_session = Mock()
+        with patch('src.trading_bot.trading.hyperliquid_executor.Exchange') as MockExchange:
+            with patch('src.trading_bot.trading.hyperliquid_executor.Info') as MockInfo:
+                # Mock Info.meta() responses
+                mock_info = MockInfo.return_value
 
                 # Initial load
-                mock_meta_response1 = Mock()
-                mock_meta_response1.status_code = 200
-                mock_meta_response1.json.return_value = {
+                meta_response1 = {
                     "universe": [{"name": "BTC"}, {"name": "ETH"}]
                 }
 
                 # Refresh load with new asset
-                mock_meta_response2 = Mock()
-                mock_meta_response2.status_code = 200
-                mock_meta_response2.json.return_value = {
+                meta_response2 = {
                     "universe": [{"name": "BTC"}, {"name": "ETH"}, {"name": "NEW"}]
                 }
 
-                mock_session.post.side_effect = [mock_meta_response1, mock_meta_response2]
-                MockSession.return_value = mock_session
+                mock_info.meta.side_effect = [meta_response1, meta_response2]
 
                 executor = HyperLiquidExecutor(
                     base_url="https://api.hyperliquid-testnet.xyz",
                     private_key="0x" + "1" * 64,
-                    use_dynamic_assets=True
+                    use_dynamic_assets=True,
+                    dry_run=True
                 )
 
                 # Initially only 2 assets
@@ -556,32 +541,28 @@ class TestHyperLiquidExecutor:
 
     def test_asset_auto_refresh_on_unknown_coin(self, mock_signer):
         """Test automatic asset refresh when unknown coin is encountered."""
-        with patch('src.trading_bot.trading.hyperliquid_executor.HyperLiquidSigner') as MockSigner:
-            MockSigner.return_value = mock_signer
-            with patch('src.trading_bot.trading.hyperliquid_executor.requests.Session') as MockSession:
-                mock_session = Mock()
+        with patch('src.trading_bot.trading.hyperliquid_executor.Exchange') as MockExchange:
+            with patch('src.trading_bot.trading.hyperliquid_executor.Info') as MockInfo:
+                # Mock Info.meta() responses
+                mock_info = MockInfo.return_value
 
                 # Initial load without NEWCOIN
-                mock_meta_response1 = Mock()
-                mock_meta_response1.status_code = 200
-                mock_meta_response1.json.return_value = {
+                meta_response1 = {
                     "universe": [{"name": "BTC"}, {"name": "ETH"}]
                 }
 
                 # Auto-refresh load with NEWCOIN
-                mock_meta_response2 = Mock()
-                mock_meta_response2.status_code = 200
-                mock_meta_response2.json.return_value = {
+                meta_response2 = {
                     "universe": [{"name": "BTC"}, {"name": "ETH"}, {"name": "NEWCOIN"}]
                 }
 
-                mock_session.post.side_effect = [mock_meta_response1, mock_meta_response2]
-                MockSession.return_value = mock_session
+                mock_info.meta.side_effect = [meta_response1, meta_response2]
 
                 executor = HyperLiquidExecutor(
                     base_url="https://api.hyperliquid-testnet.xyz",
                     private_key="0x" + "1" * 64,
-                    use_dynamic_assets=True
+                    use_dynamic_assets=True,
+                    dry_run=True
                 )
 
                 # Try to get index for NEWCOIN - should trigger auto-refresh
