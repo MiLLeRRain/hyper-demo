@@ -305,3 +305,25 @@ class AgentPerformance(Base):
 
     def __repr__(self) -> str:
         return f"<AgentPerformance(agent_id={self.agent_id}, total_value={self.total_value}, roi={self.roi_percent}%)>"
+
+
+class BotState(Base):
+    """Bot state model - stores system state for resume after restart."""
+
+    __tablename__ = "bot_state"
+
+    key: Mapped[str] = mapped_column(
+        String(100), primary_key=True,
+        comment="State key (e.g., 'trading_bot_state')"
+    )
+    value: Mapped[str] = mapped_column(
+        Text, nullable=False,
+        comment="Serialized state (JSON string)"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+        comment="Last update timestamp"
+    )
+
+    def __repr__(self) -> str:
+        return f"<BotState(key='{self.key}', updated_at={self.updated_at})>"
