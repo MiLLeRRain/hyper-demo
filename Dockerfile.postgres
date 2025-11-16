@@ -1,0 +1,23 @@
+# PostgreSQL 16 Dockerfile for Trading Bot
+FROM postgres:16-alpine
+
+# Set environment variables
+ENV POSTGRES_DB=trading_bot_dev \
+    POSTGRES_USER=trading_bot \
+    POSTGRES_PASSWORD=trading_bot_2025 \
+    PGDATA=/var/lib/postgresql/data/pgdata
+
+# Install PostgreSQL extensions (if needed in future)
+# RUN apk add --no-cache postgresql-contrib
+
+# Copy initialization scripts
+COPY docker/init-db.sql /docker-entrypoint-initdb.d/
+
+# Expose PostgreSQL port
+EXPOSE 5432
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
+    CMD pg_isready -U trading_bot -d trading_bot_dev || exit 1
+
+# Use default postgres entrypoint

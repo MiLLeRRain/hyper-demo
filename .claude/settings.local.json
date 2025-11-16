@@ -65,7 +65,9 @@
       "Bash(do git show $commit)",
       "Bash(echo:*)",
       "Bash(powershell -Command \"$env:PYTHONPATH=''D:\\trae_projs\\hyper-demo\\src''; python -m pytest tests/integration/test_database_integration.py -v --tb=short -x\")",
-      "Bash(powershell -Command \"$env:PYTHONPATH=''D:\\trae_projs\\hyper-demo\\src''; cd tests/integration; python test_database_integration.py\")"
+      "Bash(powershell -Command \"$env:PYTHONPATH=''D:\\trae_projs\\hyper-demo\\src''; cd tests/integration; python test_database_integration.py\")",
+      "Bash(tree:*)",
+      "Bash(powershell -Command:*)"
     ],
     "deny": [],
     "ask": []

@@ -7,7 +7,7 @@ The database schema is designed to support a **multi-agent AI trading system** w
 ## Schema Version
 
 - **Current Version**: 1.0
-- **Database**: PostgreSQL 13+
+- **Database**: PostgreSQL 16
 - **ORM**: SQLAlchemy 2.x
 - **Migration Tool**: Alembic
 

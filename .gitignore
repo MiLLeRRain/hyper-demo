@@ -74,3 +74,12 @@ nul
 coverage.xml
 htmlcov/
 .pytest_cache/
+
+# Docker
+docker-compose.override.yml
+.env.docker
+
+# Database backups
+backups/
+*.sql
+*.sql.gz
