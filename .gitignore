@@ -83,3 +83,6 @@ docker-compose.override.yml
 backups/
 *.sql
 *.sql.gz
+
+# But keep Docker init script
+!docker/init-db.sql
