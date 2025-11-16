@@ -1,5 +1,0 @@
-# 敏感信息替换规则
-# 格式: 原文本==>替换文本
-
-sk-REDACTED==>sk-YOUR_DEEPSEEK_API_KEY_HERE
-0xREDACTED==>0xYOUR_WALLET_ADDRESS_HERE

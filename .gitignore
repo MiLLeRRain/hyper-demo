@@ -50,6 +50,11 @@ Thumbs.db
 # Configuration files with API keys
 config.yaml
 
+# Sensitive data files (NEVER commit these!)
+sensitive-data.txt
+*sensitive*
+*secret*
+
 # Logs
 *.log
 
