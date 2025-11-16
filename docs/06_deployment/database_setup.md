@@ -11,9 +11,14 @@ Complete guide to setting up PostgreSQL 16 using Docker for the Trading Bot.
 - Docker installed ([Get Docker](https://www.docker.com/get-started))
 - Docker Compose installed (included with Docker Desktop)
 
+> **Note**: All Docker files are located in the `docker/` directory. You need to run commands from that directory.
+
 ### 1. Start PostgreSQL with Docker Compose
 
 ```bash
+# Navigate to docker directory
+cd docker
+
 # Start PostgreSQL 16 container
 docker-compose up -d postgres
 
@@ -80,7 +85,7 @@ That's it! Your PostgreSQL 16 database is ready.
 
 ## Docker Compose Configuration
 
-### File: `docker-compose.yml`
+### File: `docker/docker-compose.yml`
 
 ```yaml
 version: '3.8'
@@ -123,7 +128,11 @@ volumes:
 
 ### Container Management
 
+All commands must be run from the `docker/` directory:
+
 ```bash
+cd docker
+
 # Start database
 docker-compose up -d postgres
 
@@ -239,7 +248,7 @@ docker-compose --profile tools up -d
 
 ### 1. Change Default Password
 
-Edit `docker-compose.yml`:
+Edit `docker/docker-compose.yml`:
 
 ```yaml
 environment:
@@ -281,7 +290,7 @@ secrets:
 
 ### 3. Enable SSL/TLS
 
-Add to `docker-compose.yml`:
+Add to `docker/docker-compose.yml`:
 
 ```yaml
 volumes:

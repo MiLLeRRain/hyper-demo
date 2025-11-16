@@ -13,6 +13,10 @@
 ### 1️⃣ 启动数据库
 
 ```bash
+# 进入 docker 目录
+cd docker
+
+# 启动 PostgreSQL 16
 docker-compose up -d postgres
 ```
 
@@ -64,7 +68,7 @@ docker-compose --profile tools up -d
 
 ### 更新 .env 文件
 
-确保 `.env` 包含：
+确保项目根目录的 `.env` 包含：
 
 ```bash
 # Database Configuration (Docker)
@@ -78,6 +82,9 @@ DB_NAME=trading_bot_dev
 ### 运行集成测试
 
 ```bash
+# 回到项目根目录
+cd ..
+
 # 测试数据库连接
 python run_db_tests.py
 ```
@@ -89,7 +96,11 @@ python run_db_tests.py
 
 ## 常用命令
 
+所有命令都在 `docker/` 目录下执行：
+
 ```bash
+cd docker
+
 # 查看日志
 docker-compose logs -f postgres
 
@@ -111,20 +122,26 @@ docker-compose down -v
 ### 备份
 
 ```bash
+cd docker
+
 # 创建备份
-docker-compose exec -T postgres pg_dump -U trading_bot trading_bot_dev > backup.sql
+docker-compose exec -T postgres pg_dump -U trading_bot trading_bot_dev > ../backups/backup.sql
 ```
 
 ### 恢复
 
 ```bash
+cd docker
+
 # 从备份恢复
-docker-compose exec -T postgres psql -U trading_bot -d trading_bot_dev < backup.sql
+docker-compose exec -T postgres psql -U trading_bot -d trading_bot_dev < ../backups/backup.sql
 ```
 
 ### 查看数据库大小
 
 ```bash
+cd docker
+
 docker-compose exec postgres psql -U trading_bot -d trading_bot_dev -c "SELECT pg_size_pretty(pg_database_size('trading_bot_dev'));"
 ```
 
@@ -134,17 +151,19 @@ docker-compose exec postgres psql -U trading_bot -d trading_bot_dev -c "SELECT p
 
 如果 5432 端口已被占用：
 
-1. 编辑 `docker-compose.yml`
+1. 编辑 `docker/docker-compose.yml`
 2. 修改端口映射：
    ```yaml
    ports:
      - "5433:5432"  # 使用 5433 代替
    ```
-3. 更新 `.env` 中的 `DB_PORT=5433`
+3. 更新项目根目录的 `.env` 中的 `DB_PORT=5433`
 
 ### 容器无法启动
 
 ```bash
+cd docker
+
 # 查看详细日志
 docker-compose logs postgres
 
@@ -156,6 +175,8 @@ docker-compose up -d postgres
 ### 重置数据库
 
 ```bash
+cd docker
+
 # ⚠️ 这会删除所有数据
 docker-compose down -v
 docker-compose up -d postgres
@@ -165,28 +186,29 @@ docker-compose up -d postgres
 
 ### 更改密码
 
-1. 编辑 `docker-compose.yml`:
+1. 编辑 `docker/docker-compose.yml`:
    ```yaml
    environment:
      POSTGRES_PASSWORD: YOUR_STRONG_PASSWORD
    ```
 
-2. 更新 `.env`:
+2. 更新项目根目录的 `.env`:
    ```bash
    DB_PASSWORD=YOUR_STRONG_PASSWORD
    ```
 
 3. 重启容器:
    ```bash
+   cd docker
    docker-compose down
    docker-compose up -d postgres
    ```
 
 ## 下一步
 
-- 📖 完整文档: [docs/06_deployment/database_setup.md](docs/06_deployment/database_setup.md)
-- 📊 数据库架构: [docs/02_architecture/database_schema.md](docs/02_architecture/database_schema.md)
-- 🧪 测试指南: [docs/04_testing/integration_testing.md](docs/04_testing/integration_testing.md)
+- 📖 完整文档: [../docs/06_deployment/database_setup.md](../docs/06_deployment/database_setup.md)
+- 📊 数据库架构: [../docs/02_architecture/database_schema.md](../docs/02_architecture/database_schema.md)
+- 🧪 测试指南: [../docs/04_testing/integration_testing.md](../docs/04_testing/integration_testing.md)
 
 ## 技术栈
 
