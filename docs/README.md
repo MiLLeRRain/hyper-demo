@@ -1,6 +1,6 @@
 # 项目文档导航
 
-> 本项目的所有文档索引
+> Trading Bot 项目的完整文档索引
 
 ## 文档结构
 
@@ -11,7 +11,9 @@ docs/
 ├── 02_architecture/          # 架构设计
 ├── 03_implementation/        # 实施计划
 ├── 04_testing/               # 测试文档
-└── 05_references/            # 参考资料
+├── 05_references/            # 参考资料
+├── 06_deployment/            # 部署文档
+└── 07_operations/            # 运维文档
 ```
 
 ---
@@ -30,8 +32,8 @@ docs/
 
 系统需求和用户故事
 
-- **user_stories.md**: 用户故事 (TODO)
-- **functional_requirements.md**: 功能需求规格 (TODO)
+- **user_stories.md**: 用户故事
+- **functional_requirements.md**: 功能需求规格
 
 ---
 
@@ -39,22 +41,31 @@ docs/
 
 系统架构和技术设计
 
-- **system_overview.md**: 系统总览和架构图 (TODO)
-- **api_design.md**: REST API设计 (TODO)
-- **database_schema.md**: 数据库设计 (TODO)
-- **data_flow.md**: 数据流设计 (TODO)
+- **system_overview.md**: 系统总览和架构图
+- **api_design.md**: REST API设计
+- **database_schema.md**: 数据库设计 ✅ 已更新
+- **data_flow.md**: 数据流设计
+- **project_structure.md**: 项目结构说明 ✅ 新增
 
 ---
 
 ## 03_implementation/ - 实施计划
 
-分阶段实施计划
+分阶段实施计划和实现指南
 
-- **phase_1_data_collection.md**: 阶段1 - 数据采集 (TODO)
-- **phase_2_ai_integration.md**: 阶段2 - AI集成 (TODO)
-- **phase_3_trading_execution.md**: 阶段3 - 交易执行 (TODO)
-- **phase_4_automation.md**: 阶段4 - 自动化 (TODO)
-- **phase_5_web_frontend.md**: 阶段5 - Web前端 (TODO)
+### 阶段计划
+- **phase_1_data_collection.md**: 阶段1 - 数据采集
+- **phase_2_ai_integration.md**: 阶段2 - AI集成
+- **phase_3_trading_execution.md**: 阶段3 - 交易执行
+- **phase_4_automation.md**: 阶段4 - 自动化
+- **phase_5_web_frontend.md**: 阶段5 - Web前端
+
+### 实现指南
+- **agent_configuration.md**: 多Agent配置指南 ✅ 新增
+- **multi_agent_setup.md**: 多Agent系统设置 ✅ 新增
+- **strategy_design.md**: 策略设计指南 ✅ 新增
+- **temperature_guide.md**: LLM温度参数分析 ✅ 新增
+- **llm_integration.md**: LLM集成指南 ✅ 新增
 
 ---
 
@@ -63,9 +74,11 @@ docs/
 测试计划和测试用例
 
 - **test_plan.md**: 测试计划
-- **integration_test_setup_guide.md**: HyperLiquid 测试网集成测试准备指南 ⭐ NEW
-- **test_cases.md**: 测试用例 (TODO)
-- **acceptance_tests.md**: 验收测试场景 (TODO)
+- **integration_test_setup_guide.md**: 集成测试准备指南
+- **testnet_setup.md**: 测试网设置完整指南 ✅ 新增
+- **testnet_quick_start.md**: 测试网快速开始 ✅ 新增
+- **mainnet_testing.md**: 主网测试指南 ✅ 新增
+- **integration_testing.md**: 集成测试文档 ✅ 新增
 
 ---
 
@@ -85,12 +98,32 @@ docs/
 
 ---
 
+## 06_deployment/ - 部署文档
+
+数据库和系统部署指南
+
+- **database_setup.md**: PostgreSQL数据库安装配置 ✅ 新增
+- **database_schema_reference.md**: 数据库Schema参考 ✅ 新增
+- **environment_switching.md**: 环境切换指南 ✅ 新增
+- **long_term_running_guide.md**: 长期运行完整指南 ✅ 新增
+- **long_term_running_summary.md**: 长期运行快速总结 ✅ 新增
+
+---
+
+## 07_operations/ - 运维文档
+
+日常运维和项目管理
+
+- **commands.md**: 常用命令参考 ✅ 新增
+- **roadmap.md**: 项目路线图 ✅ 新增
+
+---
+
 ## 其他重要文档
 
 ### 项目根目录
 - **README.md**: 项目总览和快速开始
-- **ROADMAP.md**: 项目路线图
-- **CHANGELOG.md**: 变更日志 (TODO)
+- **.env.example**: 环境变量配置示例
 
 ### .claude/ (项目规范)
 - **project_rules.md**: Claude Code必须遵守的项目规则
@@ -109,15 +142,51 @@ docs/
 
 ### 对于开发者
 1. **开始前**: 阅读 `README.md` 和 `.claude/project_rules.md`
-2. **开发中**: 参考 `02_architecture/` 和 `03_implementation/`
-3. **测试时**: 参考 `04_testing/` 和 `.claude/testing_strategy.md`
-4. **遇到问题**: 查看 `.claude/progress_tracker.md` 的问题记录
+2. **环境配置**: 参考 `06_deployment/` 配置数据库和环境
+3. **开发中**: 参考 `02_architecture/` 和 `03_implementation/`
+4. **测试时**: 参考 `04_testing/` 进行测试网和主网测试
+5. **遇到问题**: 查看 `.claude/progress_tracker.md` 的问题记录
 
 ### 对于Claude Code
 1. **每次任务开始**: 阅读相关的设计文档
 2. **开发过程**: 遵循 `.claude/project_rules.md`
 3. **每日结束**: 执行 `.claude/daily_checklist.md`
 4. **记录进度**: 更新 `.claude/progress_tracker.md`
+
+---
+
+## 快速开始流程
+
+### 1. 环境配置
+```bash
+# 1. 克隆项目
+git clone <repository>
+cd hyper-demo
+
+# 2. 配置环境变量
+cp .env.example .env
+# 编辑 .env 填入你的API密钥
+
+# 3. 安装依赖
+pip install -r requirements.txt
+
+# 4. 配置数据库
+# 参考: docs/06_deployment/database_setup.md
+python scripts/init_database.py --sample-data
+```
+
+### 2. 测试网测试
+```bash
+# 参考: docs/04_testing/testnet_quick_start.md
+python test_testnet_connection.py
+python test_testnet_trading.py
+```
+
+### 3. 运行机器人
+```bash
+# 参考: docs/07_operations/commands.md
+python tradingbot.py start
+```
 
 ---
 
@@ -132,6 +201,8 @@ docs/
 | 新增模块 | `02_architecture/system_overview.md` |
 | 完成功能 | `.claude/progress_tracker.md` |
 | Bug修复 | `CHANGELOG.md` |
+| 新增配置 | `06_deployment/` 相关文档 |
+| 新增测试 | `04_testing/` 相关文档 |
 
 ### 文档审查
 - 每个Phase完成后，审查所有相关文档
@@ -146,16 +217,37 @@ docs/
 |------|------|---------|
 | nof1_ai_analysis.md | ✅ 完成 | 2025-10-30 |
 | implementation_approaches.md | ✅ 完成 | 2025-10-30 |
-| ROADMAP.md | ✅ 完成 | 2025-11-01 |
-| user_stories.md | ⏳ TODO | - |
-| system_overview.md | ⏳ TODO | - |
-| ... | ⏳ TODO | - |
+| database_schema.md | ✅ 完成 | 2025-11-16 |
+| database_setup.md | ✅ 完成 | 2025-11-16 |
+| testnet_setup.md | ✅ 完成 | 2025-11-16 |
+| agent_configuration.md | ✅ 完成 | 2025-11-16 |
+| roadmap.md | ✅ 完成 | 2025-11-01 |
+| user_stories.md | ✅ 完成 | 2025-11-01 |
+| system_overview.md | ✅ 完成 | 2025-11-01 |
 
 ---
 
 ## 快速链接
 
+### 研究与规划
 - [NoF1.ai分析](00_research/nof1_ai_analysis.md)
-- [项目路线图](../ROADMAP.md)
+- [项目路线图](07_operations/roadmap.md)
+- [实现方案对比](00_research/implementation_approaches.md)
+
+### 开发指南
+- [系统架构](02_architecture/system_overview.md)
+- [数据库设计](02_architecture/database_schema.md)
+- [项目结构](02_architecture/project_structure.md)
+- [LLM集成指南](03_implementation/llm_integration.md)
+- [多Agent配置](03_implementation/agent_configuration.md)
+
+### 部署与测试
+- [数据库设置](06_deployment/database_setup.md)
+- [测试网快速开始](04_testing/testnet_quick_start.md)
+- [主网测试指南](04_testing/mainnet_testing.md)
+- [环境切换](06_deployment/environment_switching.md)
+
+### 运维管理
+- [常用命令](07_operations/commands.md)
+- [长期运行指南](06_deployment/long_term_running_guide.md)
 - [项目规则](.claude/project_rules.md)
-- [工程化指南](../.dev/claude_code_workflow_guide.md) (仅本地)
