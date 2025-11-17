@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL 16 Database
   postgres:
@@ -17,9 +15,9 @@ services:
       # Persistent data storage
       - postgres_data:/var/lib/postgresql/data
       # Initialization scripts
-      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
       # Optional: Custom PostgreSQL config
-      # - ./docker/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      # - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
     networks:
       - trading_bot_network
     healthcheck:

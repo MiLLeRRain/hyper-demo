@@ -174,12 +174,30 @@ docker-compose up -d postgres
 
 ### 重置数据库
 
+**方式1: 使用重置脚本（推荐）**
+
+```bash
+cd docker
+
+# Windows PowerShell
+.\reset-db.ps1
+
+# Linux/Mac
+chmod +x reset-db.sh
+./reset-db.sh
+```
+
+**方式2: 手动重置**
+
 ```bash
 cd docker
 
 # ⚠️ 这会删除所有数据
 docker-compose down -v
 docker-compose up -d postgres
+
+# 查看初始化日志
+docker-compose logs postgres | findstr "initialization"
 ```
 
 ## 生产环境配置
