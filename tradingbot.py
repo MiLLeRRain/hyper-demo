@@ -4,10 +4,13 @@ Trading bot CLI entry point.
 
 Usage:
     python tradingbot.py start
+    python tradingbot.py start > bot.log 2>&1
     python tradingbot.py stop
     python tradingbot.py status
     python tradingbot.py agent list
     python tradingbot.py logs -f
+Logs:
+    Get-Content bot.log -Wait -Tail 20
 """
 
 import sys
