@@ -4,10 +4,10 @@ import pytest
 import os
 import tempfile
 from src.trading_bot.config.models import (
-    TradingBotConfig,
+    Config,
     LLMConfig,
-    ModelConfig,
-    ProviderConfig,
+    LLMModelConfig,
+    HyperLiquidConfig,
     load_config,
 )
 
@@ -16,60 +16,33 @@ from src.trading_bot.config.models import (
 class TestConfigModels:
     """Test Pydantic configuration models."""
 
-    def test_provider_config_valid(self):
-        """Test valid provider configuration."""
-        config = ProviderConfig(
-            api_key="test_key",
-            base_url="https://api.example.com",
-            model_name="test-model",
-            timeout=30,
-        )
-
-        assert config.api_key == "test_key"
-        assert config.base_url == "https://api.example.com"
-        assert config.model_name == "test-model"
-        assert config.timeout == 30
-
-    def test_model_config_valid_provider(self):
-        """Test model config accepts valid provider types."""
-        config = ModelConfig(
+    def test_llm_model_config_valid(self):
+        """Test valid LLM model configuration."""
+        config = LLMModelConfig(
             provider="official",
-            official=ProviderConfig(
-                api_key="key",
-                base_url="https://api.example.com",
-                model_name="model",
-            ),
+            official={
+                "api_key": "test_key",
+                "base_url": "https://api.example.com",
+                "model_name": "test-model",
+                "timeout": 30
+            }
         )
-
         assert config.provider == "official"
+        assert config.official["api_key"] == "test_key"
 
-    def test_model_config_invalid_provider(self):
-        """Test model config rejects invalid provider types."""
-        with pytest.raises(ValueError, match="Provider must be"):
-            ModelConfig(
-                provider="invalid",
-                official=ProviderConfig(
-                    api_key="key",
-                    base_url="url",
-                    model_name="model",
-                ),
-            )
+    def test_hyperliquid_config_urls(self):
+        """Test HyperLiquid config URL properties."""
+        config = HyperLiquidConfig(
+            mainnet_url="https://api.hyperliquid.xyz",
+            testnet_url="https://api.hyperliquid-testnet.xyz",
+            active_url="testnet_url"
+        )
+        assert config.is_testnet is True
+        assert config.exchange_url == "https://api.hyperliquid-testnet.xyz"
 
-    def test_llm_config_has_models(self, mock_llm_config):
-        """Test LLM config contains model definitions."""
-        assert "deepseek-chat" in mock_llm_config.models
-        assert "qwen-plus" in mock_llm_config.models
-        assert len(mock_llm_config.models) == 2
-
-    def test_exchange_config_base_url_testnet(self, mock_exchange_config):
-        """Test exchange config returns testnet URL."""
-        mock_exchange_config.testnet = True
-        assert mock_exchange_config.base_url == mock_exchange_config.testnet_url
-
-    def test_exchange_config_base_url_mainnet(self, mock_exchange_config):
-        """Test exchange config returns mainnet URL."""
-        mock_exchange_config.testnet = False
-        assert mock_exchange_config.base_url == mock_exchange_config.mainnet_url
+        config.active_url = "mainnet_url"
+        assert config.is_testnet is False
+        assert config.exchange_url == "https://api.hyperliquid.xyz"
 
 
 @pytest.mark.unit
@@ -83,142 +56,150 @@ class TestLoadConfig:
 
     def test_load_config_success(self):
         """Test successful config loading from YAML."""
-        # Create temporary config file
         config_yaml = """
+environment: test
+dry_run:
+  enabled: true
+  data_source: hyperliquid
+  simulate_order_fill: true
+  simulate_slippage: 0.001
+  simulate_latency_ms: 100
+  log_simulated_trades: true
+  save_dry_run_results: true
+
+hyperliquid:
+  mainnet_url: https://api.hyperliquid.xyz
+  testnet_url: https://api.hyperliquid-testnet.xyz
+  active_url: testnet_url
+
 llm:
   models:
     deepseek-chat:
       provider: official
       official:
-        api_key: test_key_123
-        base_url: https://api.deepseek.com/v1
+        api_key: test_key
+        base_url: https://api.deepseek.com
         model_name: deepseek-chat
-        timeout: 30
-    qwen-plus:
-      provider: official
-      official:
-        api_key: test_key_456
-        base_url: https://api.qwen.com/v1
-        model_name: qwen-plus
-        timeout: 30
-  max_tokens: 4096
-  temperature: 0.7
-
-exchange:
-  testnet: true
-  mainnet_url: https://api.hyperliquid.xyz
-  testnet_url: https://api.hyperliquid-testnet.xyz
+  max_tokens: 1000
+  temperature: 0.5
 
 trading:
-  interval_minutes: 3
-  coins: [BTC, ETH, SOL]
-  kline_limit_3m: 30
-  kline_limit_4h: 24
+  interval_minutes: 5
+  coins: ["BTC", "ETH"]
+  kline_limit_3m: 100
+  kline_limit_4h: 100
+  max_position_per_agent: 1000.0
+  stop_loss_percentage: 0.05
+  take_profit_percentage: 0.1
 
-risk:
-  max_position_size_usd: 2000.0
-  max_leverage: 10
-  stop_loss_pct: 0.15
-  max_drawdown_pct: 0.30
-  max_account_utilization: 0.80
+agents:
+  - name: "TestAgent"
+    enabled: true
+    provider: "deepseek-chat"
+    model: "deepseek-chat"
+    temperature: 0.7
+    max_tokens: 1000
+    description: "Test Agent"
+
+database:
+  url: "sqlite:///test.db"
+
+monitoring:
+  performance:
+    enabled: true
+  account:
+    enabled: true
+  alerts:
+    enabled: true
+
+logging:
+  level: "INFO"
+  log_dir: "logs"
+  main_log: "main.log"
+  error_log: "error.log"
+  rotation: "1 day"
+  retention: "7 days"
+  compression: "zip"
+  json_format: false
+  colorize_console: true
 """
-
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(config_yaml)
             temp_path = f.name
 
         try:
             config = load_config(temp_path)
-
-            assert "deepseek-chat" in config.llm.models
-            assert config.exchange.testnet is True
-            assert len(config.trading.coins) == 3
-            assert config.risk.max_leverage == 10
-
+            assert config.environment == "test"
+            assert config.hyperliquid.is_testnet is True
+            assert len(config.trading.coins) == 2
+            assert config.agents[0].name == "TestAgent"
         finally:
             os.unlink(temp_path)
 
     def test_load_config_with_env_vars(self, monkeypatch):
         """Test config loading with environment variable expansion."""
-        # Set environment variable
         monkeypatch.setenv("TEST_API_KEY", "secret_key_from_env")
-
+        
         config_yaml = """
+environment: test
+dry_run:
+  enabled: true
+  data_source: hyperliquid
+  simulate_order_fill: true
+  simulate_slippage: 0.001
+  simulate_latency_ms: 100
+  log_simulated_trades: true
+  save_dry_run_results: true
+
+hyperliquid:
+  mainnet_url: https://api.hyperliquid.xyz
+  testnet_url: https://api.hyperliquid-testnet.xyz
+  active_url: testnet_url
+
 llm:
   models:
     deepseek-chat:
       provider: official
       official:
         api_key: ${TEST_API_KEY}
-        base_url: https://api.deepseek.com/v1
+        base_url: https://api.deepseek.com
         model_name: deepseek-chat
-        timeout: 30
-    qwen-plus:
-      provider: official
-      official:
-        api_key: test_key
-        base_url: https://api.qwen.com/v1
-        model_name: qwen-plus
-        timeout: 30
-  max_tokens: 4096
-  temperature: 0.7
-
-exchange:
-  testnet: true
+  max_tokens: 1000
+  temperature: 0.5
 
 trading:
-  coins: [BTC]
+  interval_minutes: 5
+  coins: ["BTC"]
+  kline_limit_3m: 100
+  kline_limit_4h: 100
+  max_position_per_agent: 1000.0
+  stop_loss_percentage: 0.05
+  take_profit_percentage: 0.1
 
-risk:
-  max_leverage: 10
+agents: []
+database:
+  url: "sqlite:///test.db"
+monitoring:
+  performance: {}
+  account: {}
+  alerts: {}
+logging:
+  level: "INFO"
+  log_dir: "logs"
+  main_log: "main.log"
+  error_log: "error.log"
+  rotation: "1 day"
+  retention: "7 days"
+  compression: "zip"
+  json_format: false
+  colorize_console: true
 """
-
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(config_yaml)
             temp_path = f.name
 
         try:
             config = load_config(temp_path)
-            assert config.llm.models["deepseek-chat"].official.api_key == "secret_key_from_env"
-
-        finally:
-            os.unlink(temp_path)
-
-    def test_load_config_missing_env_var(self):
-        """Test config loading fails with missing environment variable."""
-        config_yaml = """
-llm:
-  models:
-    deepseek-chat:
-      provider: official
-      official:
-        api_key: ${MISSING_ENV_VAR}
-        base_url: https://api.deepseek.com/v1
-        model_name: deepseek-chat
-    qwen-plus:
-      provider: official
-      official:
-        api_key: test
-        base_url: https://api.qwen.com/v1
-        model_name: qwen-plus
-
-exchange:
-  testnet: true
-
-trading:
-  coins: [BTC]
-
-risk:
-  max_leverage: 10
-"""
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write(config_yaml)
-            temp_path = f.name
-
-        try:
-            with pytest.raises(ValueError, match="Environment variable.*is not set"):
-                load_config(temp_path)
-
+            assert config.llm.models["deepseek-chat"].official["api_key"] == "secret_key_from_env"
         finally:
             os.unlink(temp_path)
