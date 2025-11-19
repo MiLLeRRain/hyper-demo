@@ -101,10 +101,10 @@ class AgentManager:
                 )
             provider_cfg = model_config.official
             return OfficialAPIProvider(
-                api_key=provider_cfg.api_key,
-                base_url=provider_cfg.base_url,
-                model_name=provider_cfg.model_name,
-                timeout=provider_cfg.timeout,
+                api_key=provider_cfg.get('api_key'),
+                base_url=provider_cfg.get('base_url'),
+                model_name=provider_cfg.get('model_name'),
+                timeout=provider_cfg.get('timeout', 30),
             )
 
         elif provider_type == "openrouter":
@@ -115,10 +115,10 @@ class AgentManager:
                 )
             provider_cfg = model_config.openrouter
             return OpenRouterProvider(
-                api_key=provider_cfg.api_key,
-                base_url=provider_cfg.base_url,
-                model_name=provider_cfg.model_name,
-                timeout=provider_cfg.timeout,
+                api_key=provider_cfg.get('api_key'),
+                base_url=provider_cfg.get('base_url'),
+                model_name=provider_cfg.get('model_name'),
+                timeout=provider_cfg.get('timeout', 30),
             )
 
         else:

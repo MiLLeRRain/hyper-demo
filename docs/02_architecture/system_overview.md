@@ -665,6 +665,17 @@ class OrderManager:
         self.active_orders[order.id] = order
         return order
 
+    def place_trigger_order(
+        self,
+        coin: str,
+        side: str,
+        size: float,
+        trigger_px: float,
+        is_tp: bool
+    ) -> Order:
+        """下止盈止损触发单"""
+        pass
+
     def get_order_status(self, order_id: str) -> OrderStatus:
         """查询订单状态"""
 
@@ -1046,6 +1057,7 @@ CREATE TABLE agent_decisions (
     agent_id UUID NOT NULL REFERENCES trading_agents(id) ON DELETE CASCADE,
     market_data_snapshot JSONB NOT NULL,  -- 市场数据快照
     llm_prompt TEXT NOT NULL,
+    prompt_content TEXT,  -- 实际发送给LLM的完整Prompt内容
     llm_response TEXT NOT NULL,
     parsed_decision JSONB,  -- 解析后的决策
     created_at TIMESTAMP DEFAULT NOW(),
@@ -1174,7 +1186,8 @@ hyper-demo/
 │       │
 │       ├── trading/                   # 交易层
 │       │   ├── __init__.py
-│       │   ├── executor.py            # TradeExecutor
+│       │   ├── hyperliquid_executor.py # HyperLiquidExecutor
+│       │   ├── trading_orchestrator.py # TradingOrchestrator
 │       │   ├── order_manager.py       # OrderManager
 │       │   └── position_manager.py    # PositionManager
 │       │
@@ -1211,9 +1224,12 @@ hyper-demo/
 │   ├── integration/
 │   └── e2e/
 │
-├── alembic/                           # 数据库迁移
+├── migrations/                        # 数据库迁移
 │   ├── versions/
 │   └── env.py
+│
+├── scripts/                           # 实用脚本
+│   └── run_db_tests.py                # 数据库测试脚本
 │
 ├── config.yaml                        # 配置文件
 ├── .env.example                       # 环境变量示例

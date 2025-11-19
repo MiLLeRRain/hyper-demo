@@ -227,7 +227,7 @@ class TradingOrchestrator:
 
         # Step 6: Place stop-loss order if specified
         if decision.stop_loss_price and float(decision.stop_loss_price) > 0:
-            sl_success = self._place_stop_loss(agent_id, trade.id, decision)
+            sl_success = self._place_stop_loss(agent_id, trade.id, decision, size)
             if sl_success:
                 logger.info(f"Stop-loss order placed at ${decision.stop_loss_price}")
             else:
@@ -235,7 +235,7 @@ class TradingOrchestrator:
 
         # Step 7: Place take-profit order if specified
         if decision.take_profit_price and float(decision.take_profit_price) > 0:
-            tp_success = self._place_take_profit(agent_id, trade.id, decision)
+            tp_success = self._place_take_profit(agent_id, trade.id, decision, size)
             if tp_success:
                 logger.info(f"Take-profit order placed at ${decision.take_profit_price}")
             else:
@@ -306,19 +306,16 @@ class TradingOrchestrator:
         self,
         agent_id: UUID,
         trade_id: UUID,
-        decision: AgentDecision
+        decision: AgentDecision,
+        size: Decimal
     ) -> bool:
         """Place stop-loss order.
-
-        Note: This is a simplified implementation. In production, you would:
-        - Use HyperLiquid trigger order API
-        - Store stop-loss order ID in database
-        - Monitor and update based on order status
 
         Args:
             agent_id: Trading agent ID
             trade_id: Trade ID to protect
             decision: AgentDecision with stop_loss_price
+            size: Position size
 
         Returns:
             True if stop-loss placed successfully
@@ -328,36 +325,40 @@ class TradingOrchestrator:
             f"at ${decision.stop_loss_price}"
         )
 
-        # TODO: Implement trigger order placement
-        # This would use HyperLiquid's trigger order API
-        # For now, we log the intent
-
-        logger.warning(
-            "Stop-loss order placement not fully implemented. "
-            "Trigger orders require additional HyperLiquid API integration."
+        # Determine side (opposite of opening trade)
+        is_buy = (decision.action == "OPEN_SHORT")
+        
+        success, order_id, error = self.executor.place_trigger_order(
+            coin=decision.coin,
+            is_buy=is_buy,
+            size=size,
+            trigger_price=Decimal(str(decision.stop_loss_price)),
+            is_tp=False,
+            reduce_only=True
         )
 
-        # Return True to indicate intent was processed
-        # In production, return actual API result
-        return True
+        if success:
+            logger.info(f"Stop-loss placed successfully (OID: {order_id})")
+            # TODO: Save order_id to database linked to trade
+            return True
+        else:
+            logger.error(f"Failed to place stop-loss: {error}")
+            return False
 
     def _place_take_profit(
         self,
         agent_id: UUID,
         trade_id: UUID,
-        decision: AgentDecision
+        decision: AgentDecision,
+        size: Decimal
     ) -> bool:
         """Place take-profit order.
-
-        Note: This is a simplified implementation. In production, you would:
-        - Use HyperLiquid trigger order API
-        - Store take-profit order ID in database
-        - Monitor and update based on order status
 
         Args:
             agent_id: Trading agent ID
             trade_id: Trade ID to close at profit
             decision: AgentDecision with take_profit_price
+            size: Position size
 
         Returns:
             True if take-profit placed successfully
@@ -367,18 +368,25 @@ class TradingOrchestrator:
             f"at ${decision.take_profit_price}"
         )
 
-        # TODO: Implement trigger order placement
-        # This would use HyperLiquid's trigger order API
-        # For now, we log the intent
+        # Determine side (opposite of opening trade)
+        is_buy = (decision.action == "OPEN_SHORT")
 
-        logger.warning(
-            "Take-profit order placement not fully implemented. "
-            "Trigger orders require additional HyperLiquid API integration."
+        success, order_id, error = self.executor.place_trigger_order(
+            coin=decision.coin,
+            is_buy=is_buy,
+            size=size,
+            trigger_price=Decimal(str(decision.take_profit_price)),
+            is_tp=True,
+            reduce_only=True
         )
 
-        # Return True to indicate intent was processed
-        # In production, return actual API result
-        return True
+        if success:
+            logger.info(f"Take-profit placed successfully (OID: {order_id})")
+            # TODO: Save order_id to database linked to trade
+            return True
+        else:
+            logger.error(f"Failed to place take-profit: {error}")
+            return False
 
     def get_execution_summary(self, agent_id: UUID) -> dict:
         """Get trading execution summary for an agent.

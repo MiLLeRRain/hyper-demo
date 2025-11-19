@@ -8,14 +8,14 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from threading import Event
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import QoSQLAlchemyPoolSizing
 
 from ..config.models import Config
-from ..data.hyperliquid_client import HyperLiquidClient
+from ..data.hyperliquid_client import HyperliquidClient
 from ..data.collector import DataCollector
 from ..orchestration.multi_agent_orchestrator import MultiAgentOrchestrator
+from ..ai.agent_manager import AgentManager
 from ..trading.hyperliquid_executor import HyperLiquidExecutor
 from ..trading.order_manager import OrderManager
 from ..trading.position_manager import PositionManager
@@ -56,8 +56,9 @@ class TradingBotService:
         self.db_session_maker: Optional[sessionmaker] = None
         self.db_session: Optional[Session] = None
 
-        self.info_client: Optional[HyperLiquidClient] = None
+        self.info_client: Optional[HyperliquidClient] = None
         self.data_collector: Optional[DataCollector] = None
+        self.agent_manager: Optional[AgentManager] = None
         self.multi_agent_orchestrator: Optional[MultiAgentOrchestrator] = None
 
         self.executor: Optional[HyperLiquidExecutor] = None
@@ -239,7 +240,7 @@ class TradingBotService:
 
             # Check database connection
             try:
-                self.db_session.execute("SELECT 1")
+                self.db_session.execute(text("SELECT 1"))
                 logger.info("✅ Database connection OK")
             except Exception as e:
                 logger.error(f"Database health check failed: {e}")
@@ -247,14 +248,14 @@ class TradingBotService:
 
             # Check HyperLiquid API (Info API)
             try:
-                test_client = HyperLiquidClient(
+                test_client = HyperliquidClient(
                     base_url=self.config.hyperliquid.info_url,
                     timeout=10
                 )
                 # Try to get a price
                 price = test_client.get_price("BTC")
                 if price:
-                    logger.info(f"✅ HyperLiquid API connection OK (BTC price: ${price:.2f})")
+                    logger.info(f"✅ HyperLiquid API connection OK (BTC price: ${price.price:.2f})")
                 else:
                     logger.error("HyperLiquid API returned no data")
                     return False
@@ -275,15 +276,15 @@ class TradingBotService:
             logger.info("Initializing Phase 1 components...")
 
             # Info API client
-            self.info_client = HyperLiquidClient(
+            self.info_client = HyperliquidClient(
                 base_url=self.config.hyperliquid.info_url,
                 timeout=self.config.hyperliquid.timeout
             )
 
             # Data collector
             self.data_collector = DataCollector(
-                info_client=self.info_client,
-                coins=self.config.trading.coins
+                exchange_config=self.config.hyperliquid,
+                trading_config=self.config.trading
             )
 
             logger.info("✅ Phase 1 components initialized")
@@ -298,10 +299,16 @@ class TradingBotService:
         try:
             logger.info("Initializing Phase 2 components...")
 
+            # Agent manager
+            self.agent_manager = AgentManager(
+                db_session=self.db_session,
+                llm_config=self.config.llm
+            )
+
             # Multi-agent orchestrator
             self.multi_agent_orchestrator = MultiAgentOrchestrator(
-                config=self.config,
-                db_session=self.db_session
+                db_session=self.db_session,
+                agent_manager=self.agent_manager
             )
 
             logger.info("✅ Phase 2 components initialized")
@@ -322,7 +329,7 @@ class TradingBotService:
             self.executor = HyperLiquidExecutor(
                 base_url=self.config.hyperliquid.exchange_url,
                 private_key=self.config.hyperliquid.private_key,
-                is_testnet=self.config.hyperliquid.is_testnet,
+                dry_run=self.config.dry_run.enabled,
                 timeout=self.config.hyperliquid.timeout
             )
 

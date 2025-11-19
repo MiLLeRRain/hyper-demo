@@ -137,15 +137,8 @@ CREATE TABLE IF NOT EXISTS bot_state (
 
 \echo 'Created table: bot_state'
 
--- Insert sample data (optional - for development)
-\echo 'Inserting sample data...'
-
--- Sample agents
-INSERT INTO trading_agents (name, llm_model, exchange_account, initial_balance, strategy_description)
-VALUES
-    ('Conservative Trader', 'deepseek-chat', 'testnet_account', 10000.00, 'Low-risk trend following strategy'),
-    ('Aggressive Scalper', 'deepseek-chat', 'testnet_account', 5000.00, 'High-frequency scalping with tight stops')
-ON CONFLICT (name) DO NOTHING;
+-- Initialize bot state
+\echo 'Initializing bot state...'
 
 -- Initial bot state
 INSERT INTO bot_state (key, value)
@@ -153,7 +146,7 @@ VALUES ('trading_bot_state', '{"initialized": true, "version": "1.0"}')
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
 
 \echo '=========================================='
-\echo 'Database initialization completed!'
+\echo 'Database tables initialized!'
 \echo '=========================================='
 \echo ''
 \echo 'Tables created:'
@@ -163,9 +156,13 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
 \echo '  - agent_performance'
 \echo '  - bot_state'
 \echo ''
-\echo 'Sample data:'
-\echo '  - 2 sample agents'
-\echo '  - Initial bot state'
+\echo 'Next step:'
+\echo '  Run sync_agents_from_config.py to populate'
+\echo '  agents from config.yaml:'
 \echo ''
-\echo 'Database is ready to use!'
+\echo '    python scripts/run_sync_agents.py --reset'
+\echo ''
+\echo '  Or use the Docker command:'
+\echo '    docker exec trading_bot_postgres python /scripts/sync_agents_from_config.py --reset --db-url postgresql://trading_bot:trading_bot_2025@localhost:5432/trading_bot_dev'
+\echo ''
 \echo '=========================================='

@@ -265,7 +265,8 @@ class PositionManager:
             >>> print(f"BTC size: {size}")
         """
         # Get current market price
-        current_price = self.info_client.get_price(coin)
+        price_obj = self.info_client.get_price(coin)
+        current_price = Decimal(str(price_obj.price))
 
         # Calculate size in base currency
         # target_value_usd is the notional value desired
@@ -365,7 +366,9 @@ class PositionManager:
             ... )
             >>> print(f"Required margin: ${margin}")
         """
-        current_price = self.info_client.get_price(coin)
+        price_obj = self.info_client.get_price(coin)
+        current_price = Decimal(str(price_obj.price))
+        
         notional_value = size * current_price
         required_margin = notional_value / leverage
 

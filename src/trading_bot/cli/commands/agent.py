@@ -61,7 +61,7 @@ def list_agents(status_filter: str):
 @agent_group.command('add')
 @click.option('--name', '-n', required=True, help='Agent name')
 @click.option('--model', '-m', required=True, help='LLM model ID (e.g., deepseek-chat)')
-@click.option('--balance', '-b', type=float, default=10000, help='Initial balance (default: 10000)')
+@click.option('--balance', '-b', type=float, default=1000, help='Initial balance (default: 1000)')
 @click.option('--leverage', '-l', type=int, default=10, help='Max leverage (default: 10)')
 def add_agent(name: str, model: str, balance: float, leverage: int):
     """
@@ -186,7 +186,7 @@ def _get_all_agents(status_filter: str):
     import yaml
 
     # Load config
-    with open('config.yaml') as f:
+    with open('config.yaml', encoding='utf-8') as f:
         config_data = yaml.safe_load(f)
     cfg = Config(**config_data)
 
@@ -219,7 +219,7 @@ def _create_agent(name: str, model_id: str, balance: float, max_leverage: int):
     import yaml
 
     # Load config
-    with open('config.yaml') as f:
+    with open('config.yaml', encoding='utf-8') as f:
         config_data = yaml.safe_load(f)
     cfg = Config(**config_data)
 
@@ -261,7 +261,7 @@ def _set_agent_status(agent_id: str, status: str) -> bool:
 
     try:
         # Load config
-        with open('config.yaml') as f:
+        with open('config.yaml', encoding='utf-8') as f:
             config_data = yaml.safe_load(f)
         cfg = Config(**config_data)
 
@@ -301,7 +301,7 @@ def _get_agent_info(agent_id: str):
     import yaml
 
     # Load config
-    with open('config.yaml') as f:
+    with open('config.yaml', encoding='utf-8') as f:
         config_data = yaml.safe_load(f)
     cfg = Config(**config_data)
 

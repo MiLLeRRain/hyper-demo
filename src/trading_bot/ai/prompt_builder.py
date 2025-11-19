@@ -147,7 +147,7 @@ You have access to real-time market data, technical indicators, and your current
 
     def _build_market_data_section(
         self,
-        market_data: Dict[str, Dict[str, Any]]
+        market_data: Dict[str, Any]
     ) -> str:
         """Build the market data section with prices and technical indicators.
 
@@ -165,23 +165,33 @@ You have access to real-time market data, technical indicators, and your current
                 continue
 
             data = market_data[coin]
+            
+            # Handle MarketData object or dict
+            if hasattr(data, 'price') and hasattr(data.price, 'price'):
+                current_price = data.price.price
+            else:
+                current_price = data.get('price', 0.0)
 
             section += f"### {coin}-USD Perpetual\n\n"
-            section += f"**Current Price:** ${data['price']:,.2f}\n\n"
+            section += f"**Current Price:** ${current_price:,.2f}\n\n"
 
             # Technical indicators for each timeframe
             for tf in self.TIMEFRAMES:
-                if tf not in data:
+                # Determine where to get indicators from
+                indicators = {}
+                if hasattr(data, f"indicators_{tf}"):
+                    indicators = getattr(data, f"indicators_{tf}")
+                elif isinstance(data, dict) and tf in data:
+                    indicators = data[tf]
+                else:
                     logger.warning(f"Missing {tf} data for {coin}, skipping...")
                     continue
 
-                indicators = data[tf]
-
                 section += f"**{tf.upper()} Timeframe:**\n"
-                section += f"- EMA(20): ${indicators.get('ema', 0):,.2f}\n"
+                section += f"- EMA(20): ${indicators.get('ema_20', 0):,.2f}\n"
                 section += f"- MACD: {indicators.get('macd', 0):.4f} (Signal: {indicators.get('macd_signal', 0):.4f})\n"
-                section += f"- RSI(14): {indicators.get('rsi', 0):.2f}\n"
-                section += f"- ATR(14): ${indicators.get('atr', 0):.2f}\n\n"
+                section += f"- RSI(14): {indicators.get('rsi_14', 0):.2f}\n"
+                section += f"- ATR(14): ${indicators.get('atr_14', 0):.2f}\n\n"
 
         return section
 

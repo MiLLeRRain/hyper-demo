@@ -144,8 +144,9 @@ def main():
     print("      - Testnet wallet with faucet tokens")
     print("=" * 70)
 
-    # Load environment variables
-    env_file = Path(__file__).parent / ".env"
+    # Load environment variables from project root
+    project_root = Path(__file__).parent.parent.parent
+    env_file = project_root / ".env"
     if env_file.exists():
         load_dotenv(env_file)
         print(f"\n[OK] Loaded environment from {env_file}")

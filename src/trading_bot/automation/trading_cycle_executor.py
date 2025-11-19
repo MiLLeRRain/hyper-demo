@@ -80,7 +80,8 @@ class TradingCycleExecutor:
             ai_start = time.time()
 
             decisions = self.multi_agent_orchestrator.generate_all_decisions(
-                market_data=market_data
+                market_data=market_data,
+                position_manager=self.trading_orchestrator.position_manager
             )
 
             ai_duration = time.time() - ai_start

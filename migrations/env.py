@@ -1,11 +1,16 @@
 """Alembic environment configuration for database migrations."""
 
+import os
 from logging.config import fileConfig
 
+from dotenv import load_dotenv
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import your models Base
 from src.trading_bot.models.database import Base
@@ -19,6 +24,16 @@ if config.config_file_name is not None:
 
 # Set the target metadata for autogenerate support
 target_metadata = Base.metadata
+
+# Construct database URL from environment variables
+db_user = os.getenv("DB_USER", "postgres")
+db_password = os.getenv("DB_PASSWORD", "postgres")
+db_host = os.getenv("DB_HOST", "localhost")
+db_port = os.getenv("DB_PORT", "5432")
+db_name = os.getenv("DB_NAME", "hyperliquid_trading")
+
+db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+config.set_main_option("sqlalchemy.url", db_url)
 
 
 def run_migrations_offline() -> None:

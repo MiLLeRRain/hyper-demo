@@ -1,111 +1,146 @@
 """Pydantic models for configuration."""
 
 import os
-from typing import Dict, Optional
+import re
+from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field, field_validator
 import yaml
 
 
-class ProviderConfig(BaseModel):
-    """Configuration for a specific LLM service provider."""
+class DatabaseConfig(BaseModel):
+    url: str
+    pool_size: int = 10
+    max_overflow: int = 20
+    pool_timeout: int = 30
+    pool_recycle: int = 3600
 
-    api_key: str
-    base_url: str
-    model_name: str
-    timeout: int = 30
+
+class HyperLiquidConfig(BaseModel):
+    mainnet_url: str
+    testnet_url: str
+    private_key: Optional[str] = None
+    vault_address: Optional[str] = None
+    timeout: int = 10
+    max_retries: int = 3
+    retry_delay: int = 2
+    max_position_size: float = 1.0
+    max_leverage: int = 5
+    max_daily_trades: int = 50
+    active_url: Optional[str] = None  # From environment override
+
+    @property
+    def info_url(self) -> str:
+        if self.active_url == 'mainnet_url':
+            return self.mainnet_url
+        elif self.active_url == 'testnet_url':
+            return self.testnet_url
+        return self.testnet_url
+
+    @property
+    def exchange_url(self) -> str:
+        return self.info_url
+
+    @property
+    def is_testnet(self) -> bool:
+        return self.info_url == self.testnet_url
 
 
-class ModelConfig(BaseModel):
-    """Configuration for a specific LLM model."""
-
-    provider: str = Field(..., description="Provider to use: official | openrouter")
-    official: Optional[ProviderConfig] = None
-    openrouter: Optional[ProviderConfig] = None
-
-    @field_validator("provider")
-    @classmethod
-    def validate_provider(cls, v: str) -> str:
-        if v not in ["official", "openrouter"]:
-            raise ValueError(f"Provider must be 'official' or 'openrouter', got: {v}")
-        return v
+class LLMModelConfig(BaseModel):
+    provider: str
+    official: Optional[Dict[str, Any]] = None
+    openrouter: Optional[Dict[str, Any]] = None
 
 
 class LLMConfig(BaseModel):
-    """LLM configuration - defines available model pool.
-
-    Which models to run is determined by database (trading_agents table).
-    This config only defines what models are available.
-    """
-
-    models: Dict[str, ModelConfig] = Field(..., description="Available model pool")
-    max_tokens: int = 4096
-    temperature: float = 0.7
-
-
-class ExchangeAccountConfig(BaseModel):
-    """Configuration for a single HyperLiquid account."""
-
-    account_id: str = Field(..., description="HyperLiquid account address")
-    api_key: str = Field(..., description="HyperLiquid API key")
-    api_secret: str = Field(..., description="HyperLiquid API secret")
-
-
-class ExchangeConfig(BaseModel):
-    """HyperLiquid exchange configuration."""
-
-    testnet: bool = True
-    mainnet_url: str = "https://api.hyperliquid.xyz"
-    testnet_url: str = "https://api.hyperliquid-testnet.xyz"
-
-    # Multiple account support - agents reference account names
-    accounts: Dict[str, ExchangeAccountConfig] = Field(
-        default_factory=dict,
-        description="Available HyperLiquid accounts (referenced by agents)"
-    )
-
-    @property
-    def base_url(self) -> str:
-        """Get the appropriate base URL based on testnet setting."""
-        return self.testnet_url if self.testnet else self.mainnet_url
+    models: Dict[str, LLMModelConfig]
+    max_tokens: int = 500
+    temperature: float = 0.3
 
 
 class TradingConfig(BaseModel):
-    """Trading configuration."""
+    interval_minutes: int
+    coins: List[str]
+    kline_limit_3m: int
+    kline_limit_4h: int
+    max_position_per_agent: float
+    stop_loss_percentage: float
+    take_profit_percentage: float
 
-    interval_minutes: int = Field(3, description="AI decision interval in minutes")
-    coins: list[str] = Field(
-        default_factory=lambda: ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP"],
-        description="Coins to trade",
-    )
-    kline_limit_3m: int = Field(30, description="Number of 3m candles to fetch")
-    kline_limit_4h: int = Field(24, description="Number of 4h candles to fetch")
-
-
-class RiskConfig(BaseModel):
-    """Risk management configuration."""
-
-    max_position_size_usd: float = Field(2000.0, description="Max position size per coin")
-    max_leverage: int = Field(10, description="Maximum leverage allowed")
-    stop_loss_pct: float = Field(0.15, description="Stop loss percentage (15%)")
-    max_drawdown_pct: float = Field(0.30, description="Max account drawdown (30%)")
-    max_account_utilization: float = Field(0.80, description="Max account utilization (80%)")
+    @property
+    def cycle_interval_minutes(self) -> int:
+        return self.interval_minutes
 
 
-class TradingBotConfig(BaseModel):
-    """Main trading bot configuration."""
+class AgentConfig(BaseModel):
+    name: str
+    enabled: bool
+    provider: str
+    model: str
+    temperature: float
+    max_tokens: int
+    description: str
+    strategy_description: Optional[str] = None
 
+
+class MonitoringConfig(BaseModel):
+    performance: Dict[str, bool]
+    account: Dict[str, Any]
+    alerts: Dict[str, Any]
+
+
+class LoggingConfig(BaseModel):
+    level: str
+    log_dir: str
+    main_log: str
+    error_log: str
+    rotation: str
+    retention: str
+    compression: str
+    json_format: bool
+    colorize_console: bool
+
+
+class DryRunConfig(BaseModel):
+    enabled: bool
+    data_source: str
+    simulate_order_fill: bool
+    simulate_slippage: float
+    simulate_latency_ms: int
+    log_simulated_trades: bool
+    save_dry_run_results: bool
+
+
+class Config(BaseModel):
+    environment: str
+    dry_run: DryRunConfig
+    hyperliquid: HyperLiquidConfig
     llm: LLMConfig
-    exchange: ExchangeConfig
     trading: TradingConfig
-    risk: RiskConfig
+    agents: List[AgentConfig]
+    database: DatabaseConfig
+    monitoring: MonitoringConfig
+    logging: LoggingConfig
+    environments: Optional[Dict[str, Any]] = None
 
-    def model_post_init(self, __context) -> None:
-        """Validate cross-field dependencies after model initialization."""
-        # No validation needed - agents are managed in database
-        pass
+    def __init__(self, **data):
+        # Handle environment overrides
+        env = data.get('environment')
+        if env and 'environments' in data and env in data['environments']:
+            overrides = data['environments'][env]
+            # Deep merge overrides into data
+            self._deep_merge(data, overrides)
+        
+        super().__init__(**data)
+
+    def _deep_merge(self, target, source):
+        for key, value in source.items():
+            if isinstance(value, dict) and key in target and isinstance(target[key], dict):
+                self._deep_merge(target[key], value)
+            else:
+                target[key] = value
 
 
-def load_config(config_path: str = "config.yaml") -> TradingBotConfig:
+def load_config(config_path: str = "config.yaml") -> Config:
     """
     Load configuration from YAML file.
 
@@ -113,7 +148,7 @@ def load_config(config_path: str = "config.yaml") -> TradingBotConfig:
         config_path: Path to config YAML file
 
     Returns:
-        TradingBotConfig instance
+        Config instance
 
     Raises:
         FileNotFoundError: If config file doesn't exist
@@ -131,14 +166,19 @@ def load_config(config_path: str = "config.yaml") -> TradingBotConfig:
             return {k: expand_env_vars(v) for k, v in obj.items()}
         elif isinstance(obj, list):
             return [expand_env_vars(item) for item in obj]
-        elif isinstance(obj, str) and obj.startswith("${") and obj.endswith("}"):
-            env_var = obj[2:-1]
-            value = os.getenv(env_var)
-            if value is None:
-                raise ValueError(f"Environment variable {env_var} is not set")
-            return value
+        elif isinstance(obj, str):
+            # Replace ${VAR} with environment variable value
+            pattern = re.compile(r'\$\{([^}]+)\}')
+            
+            def replace_match(match):
+                env_var = match.group(1)
+                value = os.getenv(env_var)
+                return value if value is not None else match.group(0)
+            
+            return pattern.sub(replace_match, obj)
         return obj
 
     config_dict = expand_env_vars(config_dict)
 
-    return TradingBotConfig(**config_dict)
+    return Config(**config_dict)
+

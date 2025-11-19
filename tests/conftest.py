@@ -7,11 +7,9 @@ from unittest.mock import Mock
 
 from src.trading_bot.config.models import (
     TradingConfig,
-    ExchangeConfig,
-    RiskConfig,
+    HyperLiquidConfig,
     LLMConfig,
-    ModelConfig,
-    ProviderConfig,
+    LLMModelConfig,
 )
 from src.trading_bot.models.market_data import Price
 
@@ -24,28 +22,19 @@ def mock_trading_config():
         coins=["BTC", "ETH", "SOL"],
         kline_limit_3m=30,
         kline_limit_4h=24,
+        max_position_per_agent=0.5,
+        stop_loss_percentage=5.0,
+        take_profit_percentage=10.0,
     )
 
 
 @pytest.fixture
 def mock_exchange_config():
     """Mock exchange configuration."""
-    return ExchangeConfig(
-        testnet=True,
+    return HyperLiquidConfig(
         mainnet_url="https://api.hyperliquid.xyz",
         testnet_url="https://api.hyperliquid-testnet.xyz",
-    )
-
-
-@pytest.fixture
-def mock_risk_config():
-    """Mock risk configuration."""
-    return RiskConfig(
-        max_position_size_usd=2000.0,
-        max_leverage=10,
-        stop_loss_pct=0.15,
-        max_drawdown_pct=0.30,
-        max_account_utilization=0.80,
+        active_url="testnet_url",
     )
 
 
@@ -54,23 +43,23 @@ def mock_llm_config():
     """Mock LLM configuration - defines available model pool."""
     return LLMConfig(
         models={
-            "deepseek-chat": ModelConfig(
+            "deepseek-chat": LLMModelConfig(
                 provider="official",
-                official=ProviderConfig(
-                    api_key="test_key",
-                    base_url="https://api.deepseek.com/v1",
-                    model_name="deepseek-chat",
-                    timeout=30,
-                ),
+                official={
+                    "api_key": "test_key",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "model_name": "deepseek-chat",
+                    "timeout": 30,
+                },
             ),
-            "qwen-plus": ModelConfig(
+            "qwen-plus": LLMModelConfig(
                 provider="official",
-                official=ProviderConfig(
-                    api_key="test_key",
-                    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    model_name="qwen-plus",
-                    timeout=30,
-                ),
+                official={
+                    "api_key": "test_key",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "model_name": "qwen-plus",
+                    "timeout": 30,
+                },
             ),
         },
         max_tokens=4096,

@@ -64,6 +64,7 @@ The database schema is designed to support a **multi-agent AI trading system** w
 | `take_profit_price` | DECIMAL(20,2) | NOT NULL | Take profit price (0 for HOLD) |
 | `confidence` | DECIMAL(3,2) | NOT NULL | Confidence score 0.00-1.00 |
 | `reasoning` | TEXT | NOT NULL | LLM's reasoning |
+| `prompt_content` | TEXT | NULL | Full prompt sent to LLM |
 | `llm_response` | TEXT | NULL | Raw LLM response |
 | `execution_time_ms` | INTEGER | NULL | LLM call duration in ms |
 | `error_message` | TEXT | NULL | Error message if failed |

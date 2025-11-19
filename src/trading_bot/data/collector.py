@@ -4,7 +4,7 @@ import logging
 from typing import Dict, List
 from datetime import datetime
 
-from ..config.models import TradingConfig, ExchangeConfig
+from ..config.models import TradingConfig, HyperLiquidConfig
 from ..models.market_data import MarketData, Price
 from .hyperliquid_client import HyperliquidClient
 from .indicators import TechnicalIndicators
@@ -17,7 +17,7 @@ class DataCollector:
 
     def __init__(
         self,
-        exchange_config: ExchangeConfig,
+        exchange_config: HyperLiquidConfig,
         trading_config: TradingConfig,
     ):
         """
@@ -29,7 +29,7 @@ class DataCollector:
         """
         self.trading_config = trading_config
         self.client = HyperliquidClient(
-            base_url=exchange_config.base_url,
+            base_url=exchange_config.info_url,
             timeout=10,
         )
         self.indicators_calculator = TechnicalIndicators()

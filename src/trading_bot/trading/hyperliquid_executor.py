@@ -100,11 +100,63 @@ class HyperLiquidExecutor:
         # Dry-run tracking
         self._dry_run_order_id_counter = 10000
         self._dry_run_orders: Dict[int, Dict[str, Any]] = {}
+        
+        # Metadata cache
+        self._meta_cache = None
+        self._sz_decimals_cache = {}
 
         mode_str = "DRY-RUN MODE" if self.dry_run else "LIVE MODE"
         logger.info(
             f"Initialized HyperLiquidExecutor for {self.wallet_address} [{mode_str}]"
         )
+
+    def _get_sz_decimals(self, coin: str) -> int:
+        """Get allowed size decimals for a coin from exchange metadata.
+        
+        Args:
+            coin: Asset symbol
+            
+        Returns:
+            Number of decimals allowed for size
+        """
+        # Use cache if available
+        if coin in self._sz_decimals_cache:
+            return self._sz_decimals_cache[coin]
+            
+        try:
+            # Fetch metadata if not cached
+            if self._meta_cache is None:
+                self._meta_cache = self.info.meta()
+                
+            universe = self._meta_cache.get("universe", [])
+            for asset in universe:
+                if asset["name"] == coin:
+                    sz_decimals = asset.get("szDecimals", 3) # Default to 3 if missing
+                    self._sz_decimals_cache[coin] = sz_decimals
+                    return sz_decimals
+                    
+            # Fallback defaults if coin not found in meta
+            if coin == "BTC": return 5
+            if coin == "ETH": return 4
+            if coin == "SOL": return 2
+            return 3
+            
+        except Exception as e:
+            logger.warning(f"Failed to fetch size decimals for {coin}: {e}")
+            return 3 # Safe default
+
+    def _round_size(self, coin: str, size: float) -> float:
+        """Round size to allowed decimals.
+        
+        Args:
+            coin: Asset symbol
+            size: Size to round
+            
+        Returns:
+            Rounded size
+        """
+        decimals = self._get_sz_decimals(coin)
+        return round(size, decimals)
 
     def get_address(self) -> str:
         """Get wallet address.
@@ -226,9 +278,27 @@ class HyperLiquidExecutor:
             # Prepare order type parameter
             if order_type == OrderType.MARKET:
                 order_type_param = {"limit": {"tif": "Ioc"}}
-                # For market orders, use extreme price
+                # For market orders, calculate price with slippage
                 if price is None:
-                    price = Decimal("1000000") if is_buy else Decimal("0.1")
+                    try:
+                        # Fetch current market price
+                        all_mids = self.info.all_mids()
+                        current_price = float(all_mids.get(coin, 0))
+                        logger.info(f"Market price for {coin}: {current_price}")
+                        
+                        if current_price == 0:
+                             logger.warning(f"Could not fetch price for {coin}, using default extreme price")
+                             price = Decimal("1000000") if is_buy else Decimal("0.1")
+                        else:
+                            # Add 5% slippage for market orders
+                            slippage = 0.05
+                            if is_buy:
+                                price = Decimal(str(current_price * (1 + slippage)))
+                            else:
+                                price = Decimal(str(current_price * (1 - slippage)))
+                    except Exception as e:
+                        logger.error(f"Failed to fetch current price for market order: {e}")
+                        price = Decimal("1000000") if is_buy else Decimal("0.1")
             else:
                 if price is None:
                     return False, None, "Limit orders require a price"
@@ -236,12 +306,17 @@ class HyperLiquidExecutor:
 
             # Round price to valid tick size
             rounded_price = self._round_price_to_tick(coin, float(price))
+            
+            # Round size to valid decimals
+            rounded_size = self._round_size(coin, float(size))
+
+            logger.info(f"Placing order: {coin} {rounded_size} @ {rounded_price} (Raw price: {price})")
 
             # Place order using official SDK
             result = self.exchange.order(
                 coin,
                 is_buy=is_buy,
-                sz=float(size),
+                sz=rounded_size,
                 limit_px=rounded_price,
                 order_type=order_type_param,
                 reduce_only=reduce_only,
@@ -284,6 +359,110 @@ class HyperLiquidExecutor:
 
         except Exception as e:
             logger.error(f"Order execution failed: {e}")
+            return False, None, str(e)
+
+    def place_trigger_order(
+        self,
+        coin: str,
+        is_buy: bool,
+        size: Decimal,
+        trigger_price: Decimal,
+        is_tp: bool,
+        reduce_only: bool = True
+    ) -> Tuple[bool, Optional[int], Optional[str]]:
+        """Place a trigger order (Stop-Loss or Take-Profit).
+
+        Args:
+            coin: Asset symbol
+            is_buy: True for buy, False for sell
+            size: Order size in base currency
+            trigger_price: Price to trigger the order
+            is_tp: True for Take-Profit, False for Stop-Loss
+            reduce_only: Whether to only reduce position (default True)
+
+        Returns:
+            Tuple of (success, order_id, error_message)
+        """
+        # DRY-RUN MODE
+        if self.dry_run:
+            self._dry_run_order_id_counter += 1
+            order_id = self._dry_run_order_id_counter
+            type_str = "Take-Profit" if is_tp else "Stop-Loss"
+            
+            logger.info(
+                f"[DRY-RUN] Simulated {type_str} order: {coin} {'BUY' if is_buy else 'SELL'} "
+                f"{size} @ {trigger_price} (OID: {order_id})"
+            )
+            return True, order_id, None
+
+        # LIVE MODE
+        try:
+            # Round values
+            rounded_price = self._round_price_to_tick(coin, float(trigger_price))
+            rounded_size = self._round_size(coin, float(size))
+            
+            # Construct trigger order type
+            # "trigger": {
+            #     "triggerPx": 123.45,
+            #     "isMarket": True, 
+            #     "tpsl": "tp" # or "sl"
+            # }
+            order_type = {
+                "trigger": {
+                    "triggerPx": rounded_price,
+                    "isMarket": True,
+                    "tpsl": "tp" if is_tp else "sl"
+                }
+            }
+
+            logger.info(f"Placing trigger order ({'TP' if is_tp else 'SL'}): {coin} {rounded_size} @ {rounded_price}")
+
+            # Place order using official SDK
+            # Note: For trigger orders, limit_px is required by the method signature but 
+            # might be ignored if isMarket is True. We pass the trigger price.
+            result = self.exchange.order(
+                coin,
+                is_buy=is_buy,
+                sz=rounded_size,
+                limit_px=rounded_price,
+                order_type=order_type,
+                reduce_only=reduce_only
+            )
+
+            # Parse result
+            if result and result.get("status") == "ok":
+                response_data = result.get("response", {}).get("data", {})
+                statuses = response_data.get("statuses", [])
+
+                if statuses:
+                    status = statuses[0]
+                    
+                    # Trigger orders usually return "resting" status
+                    if "resting" in status:
+                        order_id = status["resting"]["oid"]
+                        logger.info(
+                            f"Trigger order placed: {coin} {'BUY' if is_buy else 'SELL'} "
+                            f"{size} @ {trigger_price} (OID: {order_id})"
+                        )
+                        return True, order_id, None
+                    
+                    elif "filled" in status:
+                        # Should not happen for trigger orders usually, but handle it
+                        order_id = status["filled"]["oid"]
+                        logger.info(f"Trigger order filled immediately: {coin} (OID: {order_id})")
+                        return True, order_id, None
+                        
+                    else:
+                        error = status.get("error", "Unknown error")
+                        logger.error(f"Trigger order rejected: {error}")
+                        return False, None, error
+
+            error_msg = result.get("response", "Unknown error") if result else "No response"
+            logger.error(f"Trigger order failed: {error_msg}")
+            return False, None, str(error_msg)
+
+        except Exception as e:
+            logger.error(f"Trigger order execution failed: {e}")
             return False, None, str(e)
 
     def cancel_order(

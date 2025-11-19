@@ -68,7 +68,7 @@ python tradingbot.py status
 python tradingbot.py logs -f
 ```
 
-📖 **详细指南**: [长期运行完整指南](docs/LONG_TERM_RUNNING_GUIDE.md)
+📖 **详细指南**: [长期运行完整指南](docs/06_deployment/long_term_running_guide.md)
 
 ---
 
@@ -100,7 +100,7 @@ hyper-demo/
     └── manual/             # 调试脚本
 ```
 
-详细结构见 [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
+详细结构见 [docs/02_architecture/project_structure.md](docs/02_architecture/project_structure.md)
 
 ---
 
@@ -129,8 +129,6 @@ python scripts/run_integration_tests.py --fast
 - ✅ 官方 SDK 集成验证
 - ✅ 94% 测试覆盖率
 
-查看完整测试报告：[docs/TEST_RESULTS.md](docs/TEST_RESULTS.md)
-
 ---
 
 ## 📚 核心功能
@@ -146,18 +144,20 @@ python scripts/run_integration_tests.py --fast
 - 智能 Prompt 构建
 - 决策解析和验证
 - 多 Agent 协作
+- **Prompt 日志记录** (数据库存储完整交互)
 
 ### 3️⃣ 交易执行 (Phase 3) ⭐
 - **官方 SDK 集成**
 - 限价单 / 市价单
 - 杠杆管理
 - Tick size 自动处理
+- **动态精度处理** (自动适配币种小数位)
 - Dry-run 模式
 
 ### 4️⃣ 风险管理
 - 仓位控制
 - 杠杆限制
-- 止损止盈
+- **止损止盈** (自动挂单保护)
 - 每日损失限制
 
 ### 5️⃣ 自动化 (Phase 4)
@@ -193,12 +193,11 @@ python scripts/run_integration_tests.py --fast
 
 | 文档 | 说明 |
 |------|------|
-| [LONG_TERM_RUNNING_GUIDE.md](docs/LONG_TERM_RUNNING_GUIDE.md) | ⭐ 长期运行完整指南（断点续传） |
-| [TESTNET_QUICK_START.md](docs/TESTNET_QUICK_START.md) | Testnet 快速开始指南 |
-| [LLM_INTEGRATION_GUIDE.md](docs/LLM_INTEGRATION_GUIDE.md) | LLM API 集成测试指南 |
-| [COMMANDS.md](docs/COMMANDS.md) | 所有命令参考 |
-| [TEST_RESULTS.md](docs/TEST_RESULTS.md) | 完整测试报告 |
-| [PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) | 项目结构详解 |
+| [LONG_TERM_RUNNING_GUIDE.md](docs/06_deployment/long_term_running_guide.md) | ⭐ 长期运行完整指南（断点续传） |
+| [TESTNET_QUICK_START.md](docs/04_testing/testnet_quick_start.md) | Testnet 快速开始指南 |
+| [LLM_INTEGRATION_GUIDE.md](docs/03_implementation/llm_integration.md) | LLM API 集成测试指南 |
+| [COMMANDS.md](docs/07_operations/commands.md) | 所有命令参考 |
+| [PROJECT_STRUCTURE.md](docs/02_architecture/project_structure.md) | 项目结构详解 |
 | [tests/README.md](tests/README.md) | 测试目录说明 |
 
 ---

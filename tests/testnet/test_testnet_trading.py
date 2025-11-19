@@ -172,10 +172,11 @@ def main():
         print("\n  Test cancelled by user")
         return 0
 
-    # Load environment
-    env_file = Path(__file__).parent / ".env"
+    # Load environment from project root
+    project_root = Path(__file__).parent.parent.parent
+    env_file = project_root / ".env"
     if not env_file.exists():
-        print(f"\n  [FAIL] No .env file found")
+        print(f"\n  [FAIL] No .env file found at {env_file}")
         print(f"         Create .env from .env.example")
         return 1
 

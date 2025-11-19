@@ -50,11 +50,34 @@ class MultiAgentOrchestrator:
             f"Initialized MultiAgentOrchestrator with {agent_manager.get_agent_count()} agents"
         )
 
+    def generate_all_decisions(
+        self,
+        market_data: Dict[str, Any],
+        position_manager: Any
+    ) -> List[AgentDecision]:
+        """Synchronous wrapper to generate decisions for all agents.
+        
+        Args:
+            market_data: Market data for all coins
+            position_manager: PositionManager instance to fetch agent states
+            
+        Returns:
+            List of AgentDecision objects
+        """
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        return loop.run_until_complete(
+            self.run_decision_cycle(market_data, position_manager)
+        )
+
     async def run_decision_cycle(
         self,
         market_data: Dict[str, Dict[str, Any]],
-        positions: List[Position],
-        account: AccountInfo
+        position_manager: Any
     ) -> List[AgentDecision]:
         """Run one decision cycle across all agents.
 
@@ -62,32 +85,44 @@ class MultiAgentOrchestrator:
 
         Args:
             market_data: Market data for all coins
-            positions: Current positions
-            account: Account information
+            position_manager: PositionManager to fetch agent states
 
         Returns:
             List of AgentDecision objects (saved to database)
         """
         cycle_start = datetime.utcnow()
 
-        logger.info(
-            f"Starting decision cycle | "
-            f"Agents: {self.agent_manager.get_agent_count()} | "
-            f"Account Value: ${account.account_value:,.2f}"
-        )
-
         # Get all active agents
         agents = self.agent_manager.agents
+
+        logger.info(
+            f"Starting decision cycle | "
+            f"Agents: {len(agents)}"
+        )
 
         if not agents:
             logger.warning("No active agents! Skipping decision cycle.")
             return []
 
         # Run all agents in parallel
-        agent_tasks = [
-            self._run_agent_decision(agent, market_data, positions, account)
-            for agent in agents
-        ]
+        agent_tasks = []
+        for agent in agents:
+            # Fetch agent-specific state
+            try:
+                positions = position_manager.get_current_positions(agent.id)
+                account = position_manager.get_account_value(agent.id)
+                
+                agent_tasks.append(
+                    self._run_agent_decision(agent, market_data, positions, account)
+                )
+            except Exception as e:
+                logger.error(f"Failed to fetch state for agent {agent.name}: {e}")
+                # Create failed decision immediately
+                agent_tasks.append(
+                    asyncio.create_task(
+                        self._create_failed_decision_async(agent, f"State fetch failed: {e}")
+                    )
+                )
 
         # Wait for all agents to complete
         results = await asyncio.gather(*agent_tasks, return_exceptions=True)
@@ -117,6 +152,10 @@ class MultiAgentOrchestrator:
         )
 
         return decisions
+
+    async def _create_failed_decision_async(self, agent, error_msg):
+        """Async wrapper for creating failed decision."""
+        return self._create_failed_decision(agent, error_msg)
 
     async def _run_agent_decision(
         self,
@@ -185,6 +224,7 @@ class MultiAgentOrchestrator:
                 agent=agent,
                 decision=decision,
                 llm_response=llm_response,
+                prompt_content=prompt,
                 duration_ms=int((datetime.utcnow() - agent_start).total_seconds() * 1000)
             )
 
@@ -197,13 +237,18 @@ class MultiAgentOrchestrator:
 
         except Exception as e:
             logger.error(f"[{agent.name}] Unexpected error: {e}", exc_info=True)
-            return self._create_failed_decision(agent, str(e))
+            return self._create_failed_decision(
+                agent, 
+                str(e),
+                prompt_content=prompt if 'prompt' in locals() else None
+            )
 
     def _create_successful_decision(
         self,
         agent: TradingAgent,
         decision: TradingDecision,
         llm_response: str,
+        prompt_content: str,
         duration_ms: int
     ) -> AgentDecision:
         """Create a successful AgentDecision record.
@@ -212,6 +257,7 @@ class MultiAgentOrchestrator:
             agent: Trading agent
             decision: Parsed trading decision
             llm_response: Raw LLM response
+            prompt_content: Full prompt sent to LLM
             duration_ms: Decision duration in milliseconds
 
         Returns:
@@ -230,6 +276,7 @@ class MultiAgentOrchestrator:
             confidence=decision.confidence,
             reasoning=decision.reasoning,
             llm_response=llm_response,
+            prompt_content=prompt_content,
             execution_time_ms=duration_ms,
             error_message=None
         )
@@ -242,13 +289,15 @@ class MultiAgentOrchestrator:
     def _create_failed_decision(
         self,
         agent: TradingAgent,
-        error_message: str
+        error_message: str,
+        prompt_content: Optional[str] = None
     ) -> AgentDecision:
         """Create a failed AgentDecision record.
 
         Args:
             agent: Trading agent
             error_message: Error description
+            prompt_content: Full prompt sent to LLM (optional)
 
         Returns:
             AgentDecision object (saved to database)
@@ -266,6 +315,7 @@ class MultiAgentOrchestrator:
             confidence=0.0,
             reasoning="Decision failed",
             llm_response=None,
+            prompt_content=prompt_content,
             execution_time_ms=0,
             error_message=error_message
         )

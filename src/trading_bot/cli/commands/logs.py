@@ -158,7 +158,7 @@ def _get_log_file_path() -> Path:
         from trading_bot.config.models import Config
         import yaml
 
-        with open('config.yaml') as f:
+        with open('config.yaml', encoding='utf-8') as f:
             config_data = yaml.safe_load(f)
         cfg = Config(**config_data)
 

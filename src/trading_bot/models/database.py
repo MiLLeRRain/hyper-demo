@@ -176,6 +176,10 @@ class AgentDecision(Base):
         Text,
         comment="Raw response from LLM"
     )
+    prompt_content: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment="Full prompt sent to LLM"
+    )
     execution_time_ms: Mapped[Optional[int]] = mapped_column(
         Integer,
         comment="Time taken for LLM call in milliseconds"

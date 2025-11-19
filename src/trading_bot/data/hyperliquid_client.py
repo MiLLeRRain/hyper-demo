@@ -232,8 +232,19 @@ class HyperliquidClient:
             data = self._post("/info", payload)
 
             # Parse response to find open interest for coin
-            # Format depends on actual API response
-            for asset in data:
+            # Response is typically [meta, assetCtxs]
+            asset_ctxs = []
+            if isinstance(data, list) and len(data) == 2 and isinstance(data[1], list):
+                asset_ctxs = data[1]
+            elif isinstance(data, list):
+                # Fallback or direct list
+                asset_ctxs = data
+
+            for asset in asset_ctxs:
+                # Skip if asset is not a dict (e.g. if we are iterating over the wrong list)
+                if not isinstance(asset, dict):
+                    continue
+                    
                 if asset.get("coin") == coin or asset.get("symbol") == coin:
                     return float(asset.get("openInterest", 0))
 
@@ -285,7 +296,19 @@ class HyperliquidClient:
             data = self._post("/info", payload)
 
             # Parse response to find funding rate for coin
-            for asset in data:
+            # Response is typically [meta, assetCtxs]
+            asset_ctxs = []
+            if isinstance(data, list) and len(data) == 2 and isinstance(data[1], list):
+                asset_ctxs = data[1]
+            elif isinstance(data, list):
+                # Fallback or direct list
+                asset_ctxs = data
+
+            for asset in asset_ctxs:
+                # Skip if asset is not a dict
+                if not isinstance(asset, dict):
+                    continue
+
                 if asset.get("coin") == coin or asset.get("symbol") == coin:
                     return float(asset.get("funding", 0))
 

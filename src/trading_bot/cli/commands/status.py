@@ -53,7 +53,7 @@ def _get_service_status() -> dict:
 
     try:
         # Load config
-        with open('config.yaml') as f:
+        with open('config.yaml', encoding='utf-8') as f:
             config_data = yaml.safe_load(f)
         cfg = Config(**config_data)
 

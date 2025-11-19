@@ -4,12 +4,13 @@ import click
 import sys
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from trading_bot.config.models import Config
+from trading_bot.config.models import Config, load_config
 from trading_bot.automation.trading_bot_service import TradingBotService
 import yaml
 import logging
@@ -42,16 +43,17 @@ def start_cmd(config: str, daemon: bool):
     The service will run until stopped with 'tradingbot stop' or Ctrl+C.
     """
     try:
+        # Load environment variables
+        load_dotenv()
+
         click.echo("=" * 60)
         click.echo("🚀 Starting HyperLiquid AI Trading Bot")
         click.echo("=" * 60)
 
         # Load configuration
         click.echo(f"📋 Loading configuration from: {config}")
-        with open(config) as f:
-            config_data = yaml.safe_load(f)
-
-        cfg = Config(**config_data)
+        
+        cfg = load_config(config)
         click.echo("✅ Configuration loaded")
 
         # Check if already running (simple check)

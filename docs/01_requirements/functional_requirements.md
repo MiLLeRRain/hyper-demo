@@ -207,14 +207,14 @@ $ bot agent create \
     --name "DeepSeek Agent 1" \
     --model deepseek-chat \
     --account account_1 \
-    --balance 10000.0
+    --balance 1000.0
 
 # 创建另一个agent使用不同account
 $ bot agent create \
     --name "Qwen Agent 1" \
     --model qwen-plus \
     --account account_2 \
-    --balance 10000.0
+    --balance 1000.0
 
 # 列出所有agents
 $ bot agent list

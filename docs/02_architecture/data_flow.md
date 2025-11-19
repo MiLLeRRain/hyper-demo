@@ -54,6 +54,8 @@ sequenceDiagram
     loop For each valid decision
         TE->>HL: Place order
         HL-->>TE: Order confirmation
+        TE->>HL: Place TP/SL trigger orders
+        HL-->>TE: Trigger order confirmation
         TE->>DB: Save order
     end
     TE-->>TC: Execution results
@@ -214,7 +216,7 @@ stateDiagram-v2
 3. 提交到HyperLiquid
 4. 等待成交确认
 5. 更新持仓记录
-6. 设置止损止盈
+6. 设置止损止盈（触发单）
 7. 保存到数据库
 
 ---

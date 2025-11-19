@@ -324,7 +324,7 @@ def check_config_file():
     try:
         import yaml
 
-        with open(config_file) as f:
+        with open(config_file, encoding='utf-8') as f:
             config = yaml.safe_load(f)
 
         # Check key sections
