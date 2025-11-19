@@ -22,6 +22,7 @@ class TestTradingOrchestrator:
         executor.get_address.return_value = "0x1234567890123456789012345678901234567890"
         executor.update_leverage.return_value = (True, None)
         executor.place_order.return_value = (True, 12345, None)
+        executor.place_trigger_order.return_value = (True, 67890, None)
         return executor
 
     @pytest.fixture

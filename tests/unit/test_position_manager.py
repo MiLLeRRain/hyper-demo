@@ -17,7 +17,10 @@ class TestPositionManager:
     def mock_client(self):
         """Create mock HyperLiquid client."""
         client = Mock()
-        client.get_price.return_value = Decimal("50000")  # Default BTC price
+        # Return an object with a .price attribute
+        price_obj = Mock()
+        price_obj.price = Decimal("50000")
+        client.get_price.return_value = price_obj
         return client
 
     @pytest.fixture
@@ -83,7 +86,9 @@ class TestPositionManager:
         mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
         # Mock price (current > entry, so profit)
-        mock_client.get_price.return_value = Decimal("50000")
+        price_obj = Mock()
+        price_obj.price = Decimal("50000")
+        mock_client.get_price.return_value = price_obj
 
         positions = position_manager.get_current_positions(agent_id)
 
@@ -109,7 +114,9 @@ class TestPositionManager:
         mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
         # Mock price (current < entry, so profit for short)
-        mock_client.get_price.return_value = Decimal("3000")
+        price_obj = Mock()
+        price_obj.price = Decimal("3000")
+        mock_client.get_price.return_value = price_obj
 
         positions = position_manager.get_current_positions(agent_id)
 
@@ -134,10 +141,12 @@ class TestPositionManager:
 
         # Mock prices
         def get_price_side_effect(coin):
+            price_obj = Mock()
             if coin == "BTC":
-                return Decimal("50000")
+                price_obj.price = Decimal("50000")
             elif coin == "ETH":
-                return Decimal("3000")
+                price_obj.price = Decimal("3000")
+            return price_obj
 
         mock_client.get_price.side_effect = get_price_side_effect
 
@@ -170,10 +179,12 @@ class TestPositionManager:
         mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
         def get_price_side_effect(coin):
+            price_obj = Mock()
             if coin == "BTC":
-                return Decimal("50000")
+                price_obj.price = Decimal("50000")
             elif coin == "ETH":
-                return Decimal("3000")
+                price_obj.price = Decimal("3000")
+            return price_obj
 
         mock_client.get_price.side_effect = get_price_side_effect
 
@@ -193,7 +204,10 @@ class TestPositionManager:
 
         mock_db.query.return_value.filter_by.return_value.all.return_value = [mock_open_trades[0]]
         mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
-        mock_client.get_price.return_value = Decimal("50000")
+        
+        price_obj = Mock()
+        price_obj.price = Decimal("50000")
+        mock_client.get_price.return_value = price_obj
 
         has_btc = position_manager.has_position(agent_id, "BTC")
         has_eth = position_manager.has_position(agent_id, "ETH")
@@ -213,10 +227,12 @@ class TestPositionManager:
 
         # Mock prices
         def get_price_side_effect(coin):
+            price_obj = Mock()
             if coin == "BTC":
-                return Decimal("50000")
+                price_obj.price = Decimal("50000")
             elif coin == "ETH":
-                return Decimal("3000")
+                price_obj.price = Decimal("3000")
+            return price_obj
 
         mock_client.get_price.side_effect = get_price_side_effect
 
@@ -269,7 +285,9 @@ class TestPositionManager:
     def test_calculate_position_size(self, position_manager, mock_client):
         """Test calculating position size."""
         agent_id = uuid4()
-        mock_client.get_price.return_value = Decimal("50000")
+        price_obj = Mock()
+        price_obj.price = Decimal("50000")
+        mock_client.get_price.return_value = price_obj
 
         # Want $10,000 position
         size = position_manager.calculate_position_size(
@@ -282,7 +300,9 @@ class TestPositionManager:
     def test_calculate_position_size_with_leverage(self, position_manager, mock_client):
         """Test calculating position size with leverage."""
         agent_id = uuid4()
-        mock_client.get_price.return_value = Decimal("3000")
+        price_obj = Mock()
+        price_obj.price = Decimal("3000")
+        mock_client.get_price.return_value = price_obj
 
         # Want $30,000 position at 10x leverage
         size = position_manager.calculate_position_size(
@@ -303,10 +323,12 @@ class TestPositionManager:
         mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
         def get_price_side_effect(coin):
+            price_obj = Mock()
             if coin == "BTC":
-                return Decimal("50000")
+                price_obj.price = Decimal("50000")
             elif coin == "ETH":
-                return Decimal("3000")
+                price_obj.price = Decimal("3000")
+            return price_obj
 
         mock_client.get_price.side_effect = get_price_side_effect
 
@@ -329,10 +351,12 @@ class TestPositionManager:
         mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
         def get_price_side_effect(coin):
+            price_obj = Mock()
             if coin == "BTC":
-                return Decimal("50000")
+                price_obj.price = Decimal("50000")
             elif coin == "ETH":
-                return Decimal("3000")
+                price_obj.price = Decimal("3000")
+            return price_obj
 
         mock_client.get_price.side_effect = get_price_side_effect
 
@@ -358,7 +382,9 @@ class TestPositionManager:
 
     def test_calculate_required_margin(self, position_manager, mock_client):
         """Test calculating required margin."""
-        mock_client.get_price.return_value = Decimal("50000")
+        price_obj = Mock()
+        price_obj.price = Decimal("50000")
+        mock_client.get_price.return_value = price_obj
 
         # 0.1 BTC at $50k = $5000 notional
         # At 10x leverage = $500 margin
@@ -370,7 +396,9 @@ class TestPositionManager:
 
     def test_calculate_required_margin_no_leverage(self, position_manager, mock_client):
         """Test calculating margin with 1x leverage."""
-        mock_client.get_price.return_value = Decimal("3000")
+        price_obj = Mock()
+        price_obj.price = Decimal("3000")
+        mock_client.get_price.return_value = price_obj
 
         # 1 ETH at $3000 = $3000 notional
         # At 1x leverage = $3000 margin

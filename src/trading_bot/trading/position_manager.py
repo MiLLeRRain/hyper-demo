@@ -81,7 +81,8 @@ class PositionManager:
         for trade in open_trades:
             try:
                 # Get current market price
-                current_price = self.info_client.get_price(trade.coin)
+                price_obj = self.info_client.get_price(trade.coin)
+                current_price = Decimal(str(price_obj.price))
 
                 # Calculate unrealized PnL
                 if trade.side == "long":
