@@ -10,7 +10,7 @@ to order execution, including:
 
 import logging
 from decimal import Decimal
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -43,7 +43,8 @@ class TradingOrchestrator:
 
     def __init__(
         self,
-        executor: HyperLiquidExecutor,
+        executors: Dict[str, HyperLiquidExecutor],
+        default_executor: HyperLiquidExecutor,
         order_manager: OrderManager,
         position_manager: PositionManager,
         risk_manager: RiskManager,
@@ -52,27 +53,27 @@ class TradingOrchestrator:
         """Initialize trading orchestrator.
 
         Args:
-            executor: HyperLiquid executor instance
+            executors: Map of account names to HyperLiquid executors
+            default_executor: Fallback executor
             order_manager: Order manager instance
             position_manager: Position manager instance
             risk_manager: Risk manager instance
             db_session: Database session
-
-        Example:
-            >>> executor = HyperLiquidExecutor(...)
-            >>> order_mgr = OrderManager(executor, db)
-            >>> pos_mgr = PositionManager(info_client, db)
-            >>> risk_mgr = RiskManager(pos_mgr, db)
-            >>> orchestrator = TradingOrchestrator(
-            ...     executor, order_mgr, pos_mgr, risk_mgr, db
-            ... )
         """
-        self.executor = executor
+        self.executors = executors
+        self.default_executor = default_executor
         self.order_manager = order_manager
         self.position_manager = position_manager
         self.risk_manager = risk_manager
         self.db = db_session
-        logger.info("TradingOrchestrator initialized")
+        logger.info(f"TradingOrchestrator initialized with {len(executors)} executors")
+
+    def _get_executor(self, agent: TradingAgent) -> HyperLiquidExecutor:
+        """Get the correct executor for an agent."""
+        if not agent.exchange_account:
+            return self.default_executor
+        
+        return self.executors.get(agent.exchange_account, self.default_executor)
 
     def execute_decision(
         self,
@@ -81,33 +82,9 @@ class TradingOrchestrator:
     ) -> Tuple[bool, Optional[str]]:
         """Execute an AI trading decision.
 
-        This is the main entry point for executing trading decisions.
-        It handles all decision types: HOLD, OPEN_LONG, OPEN_SHORT, CLOSE_POSITION.
-
-        Workflow:
-        1. Load decision and agent from database
-        2. Route to appropriate handler based on action
-        3. Execute trade with risk validation
-        4. Place stop-loss and take-profit orders if specified
-
         Args:
             agent_id: Trading agent ID
             decision_id: AI decision ID to execute
-
-        Returns:
-            Tuple of (success, error_message)
-            - success: True if decision executed successfully
-            - error_message: Error description if failed, None otherwise
-
-        Example:
-            >>> success, error = orchestrator.execute_decision(
-            ...     agent_id=uuid4(),
-            ...     decision_id=uuid4()
-            ... )
-            >>> if success:
-            ...     print("Decision executed successfully")
-            ... else:
-            ...     print(f"Failed: {error}")
         """
         # Load decision from database
         decision = self.db.query(AgentDecision).filter_by(id=decision_id).first()
@@ -123,6 +100,10 @@ class TradingOrchestrator:
             logger.error(f"Agent not found: {agent_id}")
             return False, "Agent not found"
 
+        # Get executor for this agent
+        executor = self._get_executor(agent)
+        logger.info(f"Using executor for account: {agent.exchange_account or 'default'}")
+
         logger.info(
             f"Executing decision: agent={agent.name}, "
             f"action={decision.action}, coin={decision.coin}"
@@ -134,10 +115,10 @@ class TradingOrchestrator:
             return True, None
 
         elif decision.action == "CLOSE_POSITION":
-            return self._close_position(agent_id, decision)
+            return self._close_position(agent_id, decision, executor)
 
         elif decision.action in ["OPEN_LONG", "OPEN_SHORT"]:
-            return self._open_position(agent_id, agent, decision)
+            return self._open_position(agent_id, agent, decision, executor)
 
         else:
             logger.error(f"Unknown action: {decision.action}")
@@ -147,24 +128,16 @@ class TradingOrchestrator:
         self,
         agent_id: UUID,
         agent: TradingAgent,
-        decision: AgentDecision
+        decision: AgentDecision,
+        executor: HyperLiquidExecutor
     ) -> Tuple[bool, Optional[str]]:
         """Open a new position.
-
-        This method:
-        1. Validates trade against risk rules
-        2. Sets leverage on exchange
-        3. Calculates position size
-        4. Executes market order
-        5. Places stop-loss and take-profit orders
 
         Args:
             agent_id: Trading agent ID
             agent: TradingAgent database object
             decision: AgentDecision to execute
-
-        Returns:
-            Tuple of (success, error_message)
+            executor: Executor to use
         """
         logger.info(
             f"Opening position: {decision.action} {decision.coin} "
@@ -176,15 +149,16 @@ class TradingOrchestrator:
             agent_id=agent_id,
             coin=decision.coin,
             size_usd=decision.size_usd,
-            leverage=decision.leverage
+            leverage=decision.leverage,
+            executor=executor
         )
 
         if not is_valid:
-            logger.warning(f"Trade rejected by risk manager: {reason}")
+            logger.warning(f"Trade rejected by risk manager for {decision.coin}: {reason}")
             return False, f"Risk check failed: {reason}"
 
         # Step 2: Set leverage on exchange
-        success, error = self.executor.update_leverage(
+        success, error = executor.update_leverage(
             coin=decision.coin,
             leverage=decision.leverage,
             is_cross=True
@@ -195,6 +169,7 @@ class TradingOrchestrator:
             return False, f"Failed to set leverage: {error}"
 
         # Step 3: Calculate position size in base currency
+        # Note: calculate_position_size uses info_client, doesn't need executor
         size = self.position_manager.calculate_position_size(
             agent_id=agent_id,
             coin=decision.coin,
@@ -216,7 +191,8 @@ class TradingOrchestrator:
             size=size,
             price=None,  # Market order
             order_type=OrderType.MARKET,
-            reduce_only=False
+            reduce_only=False,
+            executor=executor
         )
 
         if not success:
@@ -227,7 +203,7 @@ class TradingOrchestrator:
 
         # Step 6: Place stop-loss order if specified
         if decision.stop_loss_price and float(decision.stop_loss_price) > 0:
-            sl_success = self._place_stop_loss(agent_id, trade.id, decision, size)
+            sl_success = self._place_stop_loss(agent_id, trade.id, decision, size, executor)
             if sl_success:
                 logger.info(f"Stop-loss order placed at ${decision.stop_loss_price}")
             else:
@@ -235,7 +211,7 @@ class TradingOrchestrator:
 
         # Step 7: Place take-profit order if specified
         if decision.take_profit_price and float(decision.take_profit_price) > 0:
-            tp_success = self._place_take_profit(agent_id, trade.id, decision, size)
+            tp_success = self._place_take_profit(agent_id, trade.id, decision, size, executor)
             if tp_success:
                 logger.info(f"Take-profit order placed at ${decision.take_profit_price}")
             else:
@@ -246,26 +222,20 @@ class TradingOrchestrator:
     def _close_position(
         self,
         agent_id: UUID,
-        decision: AgentDecision
+        decision: AgentDecision,
+        executor: HyperLiquidExecutor
     ) -> Tuple[bool, Optional[str]]:
         """Close existing position.
-
-        This method:
-        1. Finds the open position for the coin
-        2. Executes a reduce-only market order to close
-        3. Updates trade record with exit information
 
         Args:
             agent_id: Trading agent ID
             decision: AgentDecision with CLOSE_POSITION action
-
-        Returns:
-            Tuple of (success, error_message)
+            executor: Executor to use
         """
         logger.info(f"Closing position: {decision.coin}")
 
         # Get open positions for the coin
-        positions = self.position_manager.get_current_positions(agent_id)
+        positions = self.position_manager.get_current_positions(agent_id, executor=executor)
         target_positions = [p for p in positions if p.coin == decision.coin]
 
         if not target_positions:
@@ -283,7 +253,7 @@ class TradingOrchestrator:
         # Buy to close short, sell to close long
         is_buy = (position.side == "short")
 
-        success, order_id, error = self.executor.place_order(
+        success, order_id, error = executor.place_order(
             coin=decision.coin,
             is_buy=is_buy,
             size=Decimal(str(position.size)),
@@ -307,7 +277,8 @@ class TradingOrchestrator:
         agent_id: UUID,
         trade_id: UUID,
         decision: AgentDecision,
-        size: Decimal
+        size: Decimal,
+        executor: HyperLiquidExecutor
     ) -> bool:
         """Place stop-loss order.
 
@@ -316,9 +287,7 @@ class TradingOrchestrator:
             trade_id: Trade ID to protect
             decision: AgentDecision with stop_loss_price
             size: Position size
-
-        Returns:
-            True if stop-loss placed successfully
+            executor: Executor to use
         """
         logger.info(
             f"Placing stop-loss for trade {trade_id} "
@@ -328,7 +297,7 @@ class TradingOrchestrator:
         # Determine side (opposite of opening trade)
         is_buy = (decision.action == "OPEN_SHORT")
         
-        success, order_id, error = self.executor.place_trigger_order(
+        success, order_id, error = executor.place_trigger_order(
             coin=decision.coin,
             is_buy=is_buy,
             size=size,
@@ -350,7 +319,8 @@ class TradingOrchestrator:
         agent_id: UUID,
         trade_id: UUID,
         decision: AgentDecision,
-        size: Decimal
+        size: Decimal,
+        executor: HyperLiquidExecutor
     ) -> bool:
         """Place take-profit order.
 
@@ -359,9 +329,7 @@ class TradingOrchestrator:
             trade_id: Trade ID to close at profit
             decision: AgentDecision with take_profit_price
             size: Position size
-
-        Returns:
-            True if take-profit placed successfully
+            executor: Executor to use
         """
         logger.info(
             f"Placing take-profit for trade {trade_id} "
@@ -371,7 +339,7 @@ class TradingOrchestrator:
         # Determine side (opposite of opening trade)
         is_buy = (decision.action == "OPEN_SHORT")
 
-        success, order_id, error = self.executor.place_trigger_order(
+        success, order_id, error = executor.place_trigger_order(
             coin=decision.coin,
             is_buy=is_buy,
             size=size,
@@ -431,4 +399,4 @@ class TradingOrchestrator:
 
     def __repr__(self) -> str:
         """String representation."""
-        return f"<TradingOrchestrator(executor={self.executor.get_address()})>"
+        return f"<TradingOrchestrator(executors={len(self.executors)})>"

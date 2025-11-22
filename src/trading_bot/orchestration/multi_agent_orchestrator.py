@@ -45,6 +45,9 @@ class MultiAgentOrchestrator:
         self.agent_manager = agent_manager
         self.prompt_builder = PromptBuilder()
         self.decision_parser = DecisionParser()
+        
+        self.start_time = datetime.utcnow()
+        self.invocation_count = 0
 
         logger.info(
             f"Initialized MultiAgentOrchestrator with {agent_manager.get_agent_count()} agents"
@@ -53,13 +56,13 @@ class MultiAgentOrchestrator:
     def generate_all_decisions(
         self,
         market_data: Dict[str, Any],
-        position_manager: Any
+        trading_orchestrator: Any
     ) -> List[AgentDecision]:
         """Synchronous wrapper to generate decisions for all agents.
         
         Args:
             market_data: Market data for all coins
-            position_manager: PositionManager instance to fetch agent states
+            trading_orchestrator: TradingOrchestrator instance
             
         Returns:
             List of AgentDecision objects
@@ -71,13 +74,13 @@ class MultiAgentOrchestrator:
             asyncio.set_event_loop(loop)
             
         return loop.run_until_complete(
-            self.run_decision_cycle(market_data, position_manager)
+            self.run_decision_cycle(market_data, trading_orchestrator)
         )
 
     async def run_decision_cycle(
         self,
         market_data: Dict[str, Dict[str, Any]],
-        position_manager: Any
+        trading_orchestrator: Any
     ) -> List[AgentDecision]:
         """Run one decision cycle across all agents.
 
@@ -85,18 +88,20 @@ class MultiAgentOrchestrator:
 
         Args:
             market_data: Market data for all coins
-            position_manager: PositionManager to fetch agent states
+            trading_orchestrator: TradingOrchestrator instance
 
         Returns:
             List of AgentDecision objects (saved to database)
         """
         cycle_start = datetime.utcnow()
+        self.invocation_count += 1
 
         # Get all active agents
         agents = self.agent_manager.agents
+        position_manager = trading_orchestrator.position_manager
 
         logger.info(
-            f"Starting decision cycle | "
+            f"Starting decision cycle #{self.invocation_count} | "
             f"Agents: {len(agents)}"
         )
 
@@ -109,8 +114,11 @@ class MultiAgentOrchestrator:
         for agent in agents:
             # Fetch agent-specific state
             try:
-                positions = position_manager.get_current_positions(agent.id)
-                account = position_manager.get_account_value(agent.id)
+                # Get correct executor for this agent
+                executor = trading_orchestrator._get_executor(agent)
+                
+                positions = position_manager.get_current_positions(agent.id, executor=executor)
+                account = position_manager.get_account_value(agent.id, executor=executor)
                 
                 agent_tasks.append(
                     self._run_agent_decision(agent, market_data, positions, account)
@@ -128,7 +136,7 @@ class MultiAgentOrchestrator:
         results = await asyncio.gather(*agent_tasks, return_exceptions=True)
 
         # Process results and save to database
-        decisions = []
+        all_decisions = []
         for agent, result in zip(agents, results):
             if isinstance(result, Exception):
                 logger.error(
@@ -136,26 +144,28 @@ class MultiAgentOrchestrator:
                 )
                 # Create failed decision record
                 decision = self._create_failed_decision(agent, str(result))
-                decisions.append(decision)
+                all_decisions.append(decision)
+            elif isinstance(result, list):
+                all_decisions.extend(result)
             elif result is not None:
-                decisions.append(result)
+                all_decisions.append(result)
 
         # Log cycle summary
         cycle_duration = (datetime.utcnow() - cycle_start).total_seconds()
-        successful_decisions = [d for d in decisions if d.status == "success"]
+        successful_decisions = [d for d in all_decisions if d.status == "success"]
 
         logger.info(
             f"Decision cycle complete | "
             f"Duration: {cycle_duration:.2f}s | "
-            f"Success: {len(successful_decisions)}/{len(decisions)} | "
+            f"Success: {len(successful_decisions)}/{len(all_decisions)} | "
             f"Actions: {self._summarize_actions(successful_decisions)}"
         )
 
-        return decisions
+        return all_decisions
 
     async def _create_failed_decision_async(self, agent, error_msg):
         """Async wrapper for creating failed decision."""
-        return self._create_failed_decision(agent, error_msg)
+        return [self._create_failed_decision(agent, error_msg)]
 
     async def _run_agent_decision(
         self,
@@ -163,7 +173,7 @@ class MultiAgentOrchestrator:
         market_data: Dict[str, Dict[str, Any]],
         positions: List[Position],
         account: AccountInfo
-    ) -> Optional[AgentDecision]:
+    ) -> List[AgentDecision]:
         """Run decision-making for a single agent.
 
         Args:
@@ -173,7 +183,7 @@ class MultiAgentOrchestrator:
             account: Account information
 
         Returns:
-            AgentDecision object or None if failed
+            List of AgentDecision objects
         """
         agent_start = datetime.utcnow()
 
@@ -185,63 +195,77 @@ class MultiAgentOrchestrator:
                 market_data=market_data,
                 positions=positions,
                 account=account,
-                agent=agent
+                agent=agent,
+                start_time=self.start_time,
+                invocation_count=self.invocation_count
             )
 
             # Get LLM provider
             provider = self.agent_manager.get_llm_provider(agent)
 
             # Call LLM (async)
+            # Use agent's configured max_tokens, defaulting to 2000 if not set or too low
+            max_tokens = getattr(agent, 'max_tokens', 2000)
+            if max_tokens < 1000:
+                max_tokens = 2000
+
+            # Use agent's configured temperature, defaulting to 0.3 if not set
+            temperature = getattr(agent, 'temperature', 0.3)
+
             llm_response = await provider.generate_async(
                 prompt=prompt,
-                max_tokens=500,  # JSON decision should be < 500 tokens
-                temperature=0.7,  # Some creativity, but not too much
+                max_tokens=max_tokens,
+                temperature=temperature,
             )
 
-            # Parse decision
-            decision = self.decision_parser.parse(llm_response)
+            # Parse decisions (returns a list)
+            trading_decisions = self.decision_parser.parse(llm_response)
 
-            if decision is None:
-                logger.error(f"[{agent.name}] Failed to parse decision")
-                return self._create_failed_decision(
+            if not trading_decisions:
+                logger.error(f"[{agent.name}] Failed to parse decisions")
+                return [self._create_failed_decision(
                     agent,
-                    "Failed to parse JSON decision from LLM response"
+                    "Failed to parse JSON decisions from LLM response"
+                )]
+
+            agent_decisions = []
+            for decision in trading_decisions:
+                # Validate decision logic
+                is_valid, error_msg = self.decision_parser.validate_decision_logic(
+                    decision=decision,
+                    current_positions=positions,
+                    account_value=account.account_value
                 )
 
-            # Validate decision logic
-            is_valid, error_msg = self.decision_parser.validate_decision_logic(
-                decision=decision,
-                current_positions=positions,
-                account_value=account.account_value
-            )
+                if not is_valid:
+                    logger.warning(f"[{agent.name}] Invalid decision for {decision.coin}: {error_msg}")
+                    agent_decisions.append(self._create_failed_decision(agent, error_msg))
+                    continue
 
-            if not is_valid:
-                logger.warning(f"[{agent.name}] Invalid decision: {error_msg}")
-                return self._create_failed_decision(agent, error_msg)
+                # Create successful decision record
+                agent_decision = self._create_successful_decision(
+                    agent=agent,
+                    decision=decision,
+                    llm_response=llm_response,
+                    prompt_content=prompt,
+                    duration_ms=int((datetime.utcnow() - agent_start).total_seconds() * 1000)
+                )
+                agent_decisions.append(agent_decision)
 
-            # Create successful decision record
-            agent_decision = self._create_successful_decision(
-                agent=agent,
-                decision=decision,
-                llm_response=llm_response,
-                prompt_content=prompt,
-                duration_ms=int((datetime.utcnow() - agent_start).total_seconds() * 1000)
-            )
+                logger.info(
+                    f"[{agent.name}] Decision: {decision.action} {decision.coin} | "
+                    f"Confidence: {decision.confidence:.2f}"
+                )
 
-            logger.info(
-                f"[{agent.name}] Decision: {decision.action} {decision.coin} | "
-                f"Confidence: {decision.confidence:.2f}"
-            )
-
-            return agent_decision
+            return agent_decisions
 
         except Exception as e:
             logger.error(f"[{agent.name}] Unexpected error: {e}", exc_info=True)
-            return self._create_failed_decision(
+            return [self._create_failed_decision(
                 agent, 
                 str(e),
                 prompt_content=prompt if 'prompt' in locals() else None
-            )
+            )]
 
     def _create_successful_decision(
         self,
@@ -275,6 +299,7 @@ class MultiAgentOrchestrator:
             take_profit_price=decision.take_profit_price,
             confidence=decision.confidence,
             reasoning=decision.reasoning,
+            chain_of_thought=decision.chain_of_thought,
             llm_response=llm_response,
             prompt_content=prompt_content,
             execution_time_ms=duration_ms,

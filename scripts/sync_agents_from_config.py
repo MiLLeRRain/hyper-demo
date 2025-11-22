@@ -50,6 +50,7 @@ def sync_agents(reset: bool = False, update: bool = False, db_url: str = None):
     config = load_config()
     agents_config = config.get('agents', [])
     trading_config = config.get('trading', {})
+    hyperliquid_config = config.get('hyperliquid', {})
 
     if not agents_config:
         print("[!] No agents found in config.yaml")
@@ -86,9 +87,10 @@ def sync_agents(reset: bool = False, update: bool = False, db_url: str = None):
                 if update:
                     # Update existing agent
                     existing.llm_model = agent_cfg['model']
+                    existing.exchange_account = agent_cfg.get('account', 'main_wallet')
                     existing.strategy_description = agent_cfg.get('strategy_description')
                     existing.status = 'active' if enabled else 'paused'
-                    existing.max_leverage = trading_config.get('max_leverage', 5)
+                    existing.max_leverage = hyperliquid_config.get('max_leverage', 5)
                     existing.stop_loss_pct = Decimal(str(trading_config.get('stop_loss_percentage', 5.0)))
                     existing.take_profit_pct = Decimal(str(trading_config.get('take_profit_percentage', 10.0)))
                     print(f"[U] Updated: {name} ({existing.status})")
@@ -102,10 +104,10 @@ def sync_agents(reset: bool = False, update: bool = False, db_url: str = None):
             agent = TradingAgent(
                 name=name,
                 llm_model=agent_cfg['model'],
-                exchange_account='testnet_account',
+                exchange_account=agent_cfg.get('account', 'main_wallet'),
                 initial_balance=Decimal("10000.00"),
                 max_position_size=Decimal(str(trading_config.get('max_position_per_agent', 0.5) * 100)),
-                max_leverage=trading_config.get('max_leverage', 5),
+                max_leverage=hyperliquid_config.get('max_leverage', 5),
                 stop_loss_pct=Decimal(str(trading_config.get('stop_loss_percentage', 5.0))),
                 take_profit_pct=Decimal(str(trading_config.get('take_profit_percentage', 10.0))),
                 strategy_description=agent_cfg.get('strategy_description'),

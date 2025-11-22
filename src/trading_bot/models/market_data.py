@@ -1,7 +1,7 @@
 """Market data models."""
 
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, Any, List
 from pydantic import BaseModel
 import pandas as pd
 
@@ -37,10 +37,14 @@ class MarketData(BaseModel):
     price: Price
     klines_3m: pd.DataFrame  # 3-minute K-lines
     klines_4h: pd.DataFrame  # 4-hour K-lines
-    indicators_3m: Dict[str, float]  # Technical indicators for 3m timeframe
-    indicators_4h: Dict[str, float]  # Technical indicators for 4h timeframe
+    indicators_3m: Dict[str, Any]  # Technical indicators for 3m timeframe (scalars + lists)
+    indicators_4h: Dict[str, Any]  # Technical indicators for 4h timeframe (scalars + lists)
     open_interest: Optional[float] = None
     funding_rate: Optional[float] = None
+    volume_24h: Optional[float] = None
+    volume_current_4h: Optional[float] = None
+    volume_average_4h: Optional[float] = None
+    mid_prices_list: Optional[List[float]] = None  # List of recent mid prices
 
     class Config:
         arbitrary_types_allowed = True

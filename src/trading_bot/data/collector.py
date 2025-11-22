@@ -1,7 +1,7 @@
 """Data collector that orchestrates market data gathering."""
 
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 from datetime import datetime
 
 from ..config.models import TradingConfig, HyperLiquidConfig
@@ -55,9 +55,18 @@ class DataCollector:
         market_data = {}
         errors = []
 
+        # Optimization: Fetch all prices once to avoid repeated API calls
+        try:
+            all_prices = self.client.get_all_prices()
+        except Exception as e:
+            logger.warning(f"Failed to fetch all prices batch, falling back to individual fetch: {e}")
+            all_prices = {}
+
         for coin in self.trading_config.coins:
             try:
-                data = self.collect_coin_data(coin)
+                # Pass pre-fetched price if available
+                price = all_prices.get(coin)
+                data = self.collect_coin_data(coin, price=price)
                 market_data[coin] = data
                 logger.debug(f"✓ Collected data for {coin}")
             except Exception as e:
@@ -82,12 +91,13 @@ class DataCollector:
 
         return market_data
 
-    def collect_coin_data(self, coin: str) -> MarketData:
+    def collect_coin_data(self, coin: str, price: Optional[Price] = None) -> MarketData:
         """
         Collect comprehensive market data for a single coin.
 
         Args:
             coin: Coin symbol (e.g., "BTC")
+            price: Optional pre-fetched Price object
 
         Returns:
             MarketData object with price, klines, and indicators
@@ -97,8 +107,9 @@ class DataCollector:
         """
         logger.debug(f"Collecting data for {coin}...")
 
-        # 1. Get current price
-        price = self.client.get_price(coin)
+        # 1. Get current price (use provided or fetch new)
+        if price is None:
+            price = self.client.get_price(coin)
 
         # 2. Get K-lines for both timeframes
         klines_3m = self.client.get_klines(
@@ -114,24 +125,30 @@ class DataCollector:
         )
 
         # 3. Calculate technical indicators for both timeframes
-        indicators_3m = self.indicators_calculator.calculate_all(klines_3m)
-        indicators_4h = self.indicators_calculator.calculate_all(klines_4h)
+        indicators_3m = self.indicators_calculator.calculate_all(klines_3m, history_len=10)
+        indicators_4h = self.indicators_calculator.calculate_all(klines_4h, history_len=10)
 
         # 4. Get additional data (optional, may fail)
         open_interest = None
         funding_rate = None
 
         try:
-            open_interest = self.client.get_open_interest(coin)
+            # Note: HyperLiquidClient needs to support these methods
+            # If not available, we might need to add them or handle the error
+            if hasattr(self.client, 'get_open_interest'):
+                open_interest = self.client.get_open_interest(coin)
+            
+            if hasattr(self.client, 'get_funding_rate'):
+                funding_rate = self.client.get_funding_rate(coin)
+                
         except Exception as e:
-            logger.debug(f"Failed to get open interest for {coin}: {e}")
-
-        try:
-            funding_rate = self.client.get_funding_rate(coin)
-        except Exception as e:
-            logger.debug(f"Failed to get funding rate for {coin}: {e}")
+            logger.debug(f"Failed to get additional data for {coin}: {e}")
 
         # 5. Construct MarketData object
+        # Extract mid prices list (using close prices as proxy for mid prices if mid not available)
+        mid_prices_list = klines_3m["close"].tail(10).tolist() if not klines_3m.empty else []
+        mid_prices_list = [float(x) for x in mid_prices_list]
+
         market_data = MarketData(
             coin=coin,
             price=price,
@@ -141,6 +158,10 @@ class DataCollector:
             indicators_4h=indicators_4h,
             open_interest=open_interest,
             funding_rate=funding_rate,
+            volume_24h=price.volume_24h,
+            volume_current_4h=indicators_4h.get("volume_current"),
+            volume_average_4h=indicators_4h.get("volume_avg"),
+            mid_prices_list=mid_prices_list
         )
 
         return market_data

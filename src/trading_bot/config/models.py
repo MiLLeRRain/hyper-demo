@@ -15,11 +15,18 @@ class DatabaseConfig(BaseModel):
     pool_recycle: int = 3600
 
 
+class AccountConfig(BaseModel):
+    name: str
+    private_key: str
+    vault_address: Optional[str] = None
+
+
 class HyperLiquidConfig(BaseModel):
     mainnet_url: str
     testnet_url: str
-    private_key: Optional[str] = None
-    vault_address: Optional[str] = None
+    accounts: List[AccountConfig] = []
+    private_key: Optional[str] = None  # Deprecated, use accounts
+    vault_address: Optional[str] = None # Deprecated, use accounts
     timeout: int = 10
     max_retries: int = 3
     retry_delay: int = 2
@@ -73,6 +80,7 @@ class TradingConfig(BaseModel):
 
 class AgentConfig(BaseModel):
     name: str
+    account: Optional[str] = None  # Reference to account name in hyperliquid.accounts
     enabled: bool
     provider: str
     model: str
@@ -121,6 +129,22 @@ class Config(BaseModel):
     monitoring: MonitoringConfig
     logging: LoggingConfig
     environments: Optional[Dict[str, Any]] = None
+
+    @field_validator('agents')
+    @classmethod
+    def validate_unique_accounts(cls, v: List[AgentConfig]) -> List[AgentConfig]:
+        """Ensure each agent has a unique account assigned."""
+        accounts = [agent.account for agent in v if agent.account]
+        if len(accounts) != len(set(accounts)):
+            # Find duplicates
+            seen = set()
+            dupes = set()
+            for x in accounts:
+                if x in seen:
+                    dupes.add(x)
+                seen.add(x)
+            raise ValueError(f"Agents must have unique accounts (1-1 relationship). Duplicate accounts found: {dupes}")
+        return v
 
     def __init__(self, **data):
         # Handle environment overrides

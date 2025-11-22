@@ -3,7 +3,7 @@
 import json
 import re
 import logging
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, Field, validator
 
@@ -25,6 +25,7 @@ class TradingDecision(BaseModel):
     stop_loss_price: float = Field(..., ge=0, description="Stop loss price")
     take_profit_price: float = Field(..., ge=0, description="Take profit price")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score")
+    chain_of_thought: Optional[dict] = Field(None, description="Structured Chain of Thought for this coin")
 
     @validator("action")
     def validate_action(cls, v):
@@ -118,101 +119,113 @@ class DecisionParser:
         """Initialize the Decision Parser."""
         pass
 
-    def parse(self, llm_response: str) -> Optional[TradingDecision]:
-        """Parse and validate a trading decision from LLM response.
+    def parse(self, llm_response: str) -> List[TradingDecision]:
+        """Parse and validate trading decisions from LLM response.
 
         Args:
             llm_response: Raw response string from LLM
 
         Returns:
-            TradingDecision object if parsing succeeds, None otherwise
+            List of TradingDecision objects
         """
+        decisions = []
         try:
             # Extract JSON from response
             json_str = self._extract_json(llm_response)
 
             if not json_str:
                 logger.error("Failed to extract JSON from LLM response")
-                logger.debug(f"LLM response: {llm_response[:500]}")
-                return None
+                return []
 
             # Parse JSON
-            decision_dict = json.loads(json_str)
+            cot_dict = json.loads(json_str)
 
-            # Validate with Pydantic model
-            decision = TradingDecision(**decision_dict)
+            # Iterate over each coin in the dictionary
+            for coin, decision_data in cot_dict.items():
+                try:
+                    # Map fields to TradingDecision format
+                    signal = decision_data.get("signal", "hold").lower()
+                    
+                    action_map = {
+                        "long": "OPEN_LONG",
+                        "short": "OPEN_SHORT",
+                        "close": "CLOSE_POSITION",
+                        "hold": "HOLD"
+                    }
+                    action = action_map.get(signal, "HOLD")
+                    
+                    # Calculate size_usd (Notional)
+                    # risk_usd is usually the margin amount. Notional = risk_usd * leverage
+                    risk_usd = float(decision_data.get("risk_usd", 0))
+                    leverage = int(decision_data.get("leverage", 1))
+                    size_usd = risk_usd * leverage
+                    
+                    # If action is CLOSE or HOLD, size should be 0 for validation
+                    if action in ["CLOSE_POSITION", "HOLD"]:
+                        size_usd = 0.0
+                        stop_loss = 0.0
+                        take_profit = 0.0
+                        # Ensure leverage is at least 1 for validation, even if not used
+                        if leverage < 1:
+                            leverage = 1
+                    else:
+                        stop_loss = float(decision_data.get("stop_loss", 0))
+                        take_profit = float(decision_data.get("profit_target", 0))
 
-            logger.info(
-                f"Parsed decision: {decision.action} {decision.coin} "
-                f"| Confidence: {decision.confidence:.2f}"
-            )
+                    decision = TradingDecision(
+                        reasoning=decision_data.get("justification") or decision_data.get("reasoning") or decision_data.get("analysis") or decision_data.get("invalidation_condition") or "No reasoning provided",
+                        action=action,
+                        coin=decision_data.get("coin", coin),
+                        size_usd=size_usd,
+                        leverage=leverage,
+                        stop_loss_price=stop_loss,
+                        take_profit_price=take_profit,
+                        confidence=float(decision_data.get("confidence", 0)),
+                        chain_of_thought=decision_data
+                    )
+                    decisions.append(decision)
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to parse decision for {coin}: {e}")
+                    continue
 
-            return decision
+            logger.info(f"Parsed {len(decisions)} decisions from response")
+            return decisions
 
         except json.JSONDecodeError as e:
             logger.error(f"JSON decode error: {e}")
-            logger.debug(f"JSON string: {json_str}")
-            return None
+            return []
 
         except Exception as e:
             logger.error(f"Decision parsing error: {e}")
-            logger.debug(f"LLM response: {llm_response[:500]}")
-            return None
+            return []
 
     def _extract_json(self, text: str) -> Optional[str]:
-        """Extract JSON string from LLM response.
+        """Extract JSON string from LLM response."""
+        # Look for CHAIN_OF_THOUGHT block
+        if "CHAIN_OF_THOUGHT" in text:
+            parts = text.split("CHAIN_OF_THOUGHT")
+            if len(parts) > 1:
+                # Take the part after CHAIN_OF_THOUGHT
+                potential_json = parts[1]
+                # If TRADING_DECISIONS exists, take content before it
+                if "TRADING_DECISIONS" in potential_json:
+                    potential_json = potential_json.split("TRADING_DECISIONS")[0]
+                
+                return potential_json.strip()
 
-        LLMs often wrap JSON in markdown code blocks like:
-        ```json
-        { ... }
-        ```
-
-        Or include extra text before/after the JSON.
-
-        Args:
-            text: Raw text from LLM
-
-        Returns:
-            JSON string if found, None otherwise
-        """
-        # Try to find JSON in markdown code block
-        # Pattern: ```json ... ``` or ``` ... ```
+        # Fallback to code block extraction
         code_block_pattern = r"```(?:json)?\s*(\{.*?\})\s*```"
         match = re.search(code_block_pattern, text, re.DOTALL)
-
         if match:
-            logger.debug("Found JSON in markdown code block")
             return match.group(1).strip()
 
-        # Try to find raw JSON object
-        # Pattern: { ... }
+        # Fallback to raw JSON object
         json_pattern = r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}"
         match = re.search(json_pattern, text, re.DOTALL)
-
         if match:
-            logger.debug("Found raw JSON object")
             return match.group(0).strip()
 
-        # Try to find JSON that spans multiple lines
-        # More aggressive pattern for nested structures
-        try:
-            # Find the first { and last }
-            start_idx = text.find("{")
-            end_idx = text.rfind("}")
-
-            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                potential_json = text[start_idx : end_idx + 1]
-
-                # Validate it's actually JSON
-                json.loads(potential_json)
-
-                logger.debug("Found JSON using aggressive search")
-                return potential_json
-
-        except (json.JSONDecodeError, Exception):
-            pass
-
-        logger.warning("Could not extract JSON from response")
         return None
 
     def validate_decision_logic(

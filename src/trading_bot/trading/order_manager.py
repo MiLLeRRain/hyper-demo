@@ -70,53 +70,27 @@ class OrderManager:
         price: Optional[Decimal] = None,
         order_type: str = OrderType.LIMIT,
         reduce_only: bool = False,
-        client_order_id: Optional[str] = None
+        client_order_id: Optional[str] = None,
+        executor: Optional[HyperLiquidExecutor] = None
     ) -> Tuple[bool, Optional[AgentTrade], Optional[str]]:
         """Execute a trade based on AI decision.
 
-        This method:
-        1. Places the order on HyperLiquid exchange
-        2. Creates a database record if successful
-        3. Returns the trade record and status
-
         Args:
-            agent_id: Trading agent ID
-            decision_id: AI decision ID that triggered this trade
-            coin: Trading pair symbol (BTC, ETH, etc)
-            side: Order side (LONG or SHORT)
-            size: Order size in base currency
-            price: Limit price (None for market orders)
-            order_type: "limit" or "market"
-            reduce_only: If True, order can only reduce position
-            client_order_id: Optional client-side order ID
-
-        Returns:
-            Tuple of (success, trade_record, error_message)
-            - success: True if order placed and recorded successfully
-            - trade_record: AgentTrade object if successful, None otherwise
-            - error_message: Error description if failed, None otherwise
-
-        Example:
-            >>> success, trade, error = manager.execute_trade(
-            ...     agent_id=uuid4(),
-            ...     decision_id=uuid4(),
-            ...     coin="BTC",
-            ...     side=OrderSide.LONG,
-            ...     size=Decimal("0.1"),
-            ...     price=Decimal("50000")
-            ... )
-            >>> if success:
-            ...     print(f"Trade ID: {trade.id}")
+            executor: Specific executor to use (overrides default)
+            ...
         """
+        # Use specific executor if provided, else default
+        active_executor = executor or self.executor
+
         is_buy = (side == OrderSide.LONG)
 
         logger.info(
             f"Executing trade: {coin} {side.value.upper()} "
-            f"{size} @ {price or 'MARKET'}"
+            f"{size} @ {price or 'MARKET'} (Executor: {active_executor.get_address()})"
         )
 
         # Execute order on exchange
-        success, order_id, error = self.executor.place_order(
+        success, order_id, error = active_executor.place_order(
             coin=coin,
             is_buy=is_buy,
             size=size,
@@ -157,7 +131,7 @@ class OrderManager:
 
             # Try to cancel the order since we couldn't record it
             try:
-                self.executor.cancel_order(coin, order_id)
+                active_executor.cancel_order(coin, order_id)
                 logger.warning(f"Cancelled orphaned order {order_id}")
             except Exception as cancel_error:
                 logger.error(f"Failed to cancel orphaned order: {cancel_error}")
@@ -166,25 +140,14 @@ class OrderManager:
 
     def cancel_trade(
         self,
-        trade_id: UUID
+        trade_id: UUID,
+        executor: Optional[HyperLiquidExecutor] = None
     ) -> Tuple[bool, Optional[str]]:
         """Cancel an open trade.
 
-        This method:
-        1. Looks up the trade in the database
-        2. Cancels the order on the exchange
-        3. Updates the trade status to "cancelled"
-
         Args:
             trade_id: Trade ID to cancel
-
-        Returns:
-            Tuple of (success, error_message)
-
-        Example:
-            >>> success, error = manager.cancel_trade(trade_id)
-            >>> if not success:
-            ...     print(f"Cancel failed: {error}")
+            executor: Specific executor to use
         """
         trade = self.db.query(AgentTrade).filter_by(id=trade_id).first()
 
@@ -194,9 +157,12 @@ class OrderManager:
         if trade.status != "open":
             return False, f"Cannot cancel trade with status: {trade.status}"
 
+        # Use specific executor if provided, else default
+        active_executor = executor or self.executor
+
         # Cancel order on exchange
         order_id = int(trade.hyperliquid_order_id)
-        success, error = self.executor.cancel_order(trade.coin, order_id)
+        success, error = active_executor.cancel_order(trade.coin, order_id)
 
         if not success:
             logger.error(f"Failed to cancel order {order_id}: {error}")

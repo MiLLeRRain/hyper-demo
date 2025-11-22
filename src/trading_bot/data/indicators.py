@@ -1,7 +1,7 @@
 """Technical indicators calculation using pandas-ta."""
 
 import logging
-from typing import Dict
+from typing import Dict, Any, List
 import pandas as pd
 import pandas_ta as ta
 
@@ -15,26 +15,16 @@ class TechnicalIndicators:
         """Initialize indicators calculator."""
         pass
 
-    def calculate_all(self, df: pd.DataFrame) -> Dict[str, float]:
+    def calculate_all(self, df: pd.DataFrame, history_len: int = 10) -> Dict[str, Any]:
         """
         Calculate all technical indicators for the given K-line data.
 
         Args:
             df: DataFrame with columns: timestamp, open, high, low, close, volume
+            history_len: Number of historical data points to return in lists
 
         Returns:
-            Dictionary with indicator values:
-            {
-                "ema_20": float,
-                "ema_50": float,
-                "macd": float,
-                "macd_signal": float,
-                "macd_histogram": float,
-                "rsi_7": float,
-                "rsi_14": float,
-                "atr_3": float,
-                "atr_14": float,
-            }
+            Dictionary with indicator values (scalars and lists)
         """
         if df.empty or len(df) < 50:
             logger.warning("Insufficient data for indicator calculation")
@@ -44,20 +34,46 @@ class TechnicalIndicators:
             indicators = {}
 
             # EMA (Exponential Moving Average)
-            indicators["ema_20"] = self.calculate_ema(df, period=20)
-            indicators["ema_50"] = self.calculate_ema(df, period=50)
+            ema_20 = ta.ema(df["close"], length=20)
+            ema_50 = ta.ema(df["close"], length=50)
+            
+            indicators["ema_20"] = float(ema_20.iloc[-1]) if not ema_20.empty else 0.0
+            indicators["ema_50"] = float(ema_50.iloc[-1]) if not ema_50.empty else 0.0
+            indicators["ema_20_list"] = self._get_tail(ema_20, history_len)
 
             # MACD
-            macd_dict = self.calculate_macd(df)
-            indicators.update(macd_dict)
+            macd_df = ta.macd(df["close"], fast=12, slow=26, signal=9)
+            if macd_df is not None and not macd_df.empty:
+                macd_col = "MACD_12_26_9"
+                signal_col = "MACDs_12_26_9"
+                hist_col = "MACDh_12_26_9"
+                
+                indicators["macd"] = float(macd_df[macd_col].iloc[-1])
+                indicators["macd_signal"] = float(macd_df[signal_col].iloc[-1])
+                indicators["macd_histogram"] = float(macd_df[hist_col].iloc[-1])
+                indicators["macd_list"] = self._get_tail(macd_df[macd_col], history_len)
+            else:
+                indicators.update({"macd": 0.0, "macd_signal": 0.0, "macd_histogram": 0.0, "macd_list": []})
 
             # RSI (Relative Strength Index)
-            indicators["rsi_7"] = self.calculate_rsi(df, period=7)
-            indicators["rsi_14"] = self.calculate_rsi(df, period=14)
+            rsi_7 = ta.rsi(df["close"], length=7)
+            rsi_14 = ta.rsi(df["close"], length=14)
+            
+            indicators["rsi_7"] = float(rsi_7.iloc[-1]) if not rsi_7.empty else 50.0
+            indicators["rsi_14"] = float(rsi_14.iloc[-1]) if not rsi_14.empty else 50.0
+            indicators["rsi_7_list"] = self._get_tail(rsi_7, history_len)
+            indicators["rsi_14_list"] = self._get_tail(rsi_14, history_len)
 
             # ATR (Average True Range)
-            indicators["atr_3"] = self.calculate_atr(df, period=3)
-            indicators["atr_14"] = self.calculate_atr(df, period=14)
+            atr_3 = ta.atr(df["high"], df["low"], df["close"], length=3)
+            atr_14 = ta.atr(df["high"], df["low"], df["close"], length=14)
+            
+            indicators["atr_3"] = float(atr_3.iloc[-1]) if not atr_3.empty else 0.0
+            indicators["atr_14"] = float(atr_14.iloc[-1]) if not atr_14.empty else 0.0
+
+            # Volume
+            indicators["volume_current"] = float(df["volume"].iloc[-1])
+            indicators["volume_avg"] = float(df["volume"].rolling(window=20).mean().iloc[-1])
 
             logger.debug(f"Calculated {len(indicators)} indicators")
             return indicators
@@ -65,6 +81,13 @@ class TechnicalIndicators:
         except Exception as e:
             logger.error(f"Failed to calculate indicators: {e}")
             return self._empty_indicators()
+
+    def _get_tail(self, series: pd.Series, length: int) -> List[float]:
+        """Get the last N values from a series as a list of floats."""
+        if series is None or series.empty:
+            return []
+        return [float(x) for x in series.tail(length).tolist()]
+
 
     def calculate_ema(self, df: pd.DataFrame, period: int) -> float:
         """
@@ -197,16 +220,22 @@ class TechnicalIndicators:
         }
 
     @staticmethod
-    def _empty_indicators() -> Dict[str, float]:
+    def _empty_indicators() -> Dict[str, Any]:
         """Return empty indicators dictionary with zero values."""
         return {
             "ema_20": 0.0,
             "ema_50": 0.0,
+            "ema_20_list": [],
             "macd": 0.0,
             "macd_signal": 0.0,
             "macd_histogram": 0.0,
+            "macd_list": [],
             "rsi_7": 50.0,
             "rsi_14": 50.0,
+            "rsi_7_list": [],
+            "rsi_14_list": [],
             "atr_3": 0.0,
             "atr_14": 0.0,
+            "volume_current": 0.0,
+            "volume_avg": 0.0,
         }

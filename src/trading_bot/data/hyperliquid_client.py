@@ -231,25 +231,38 @@ class HyperliquidClient:
         try:
             data = self._post("/info", payload)
 
-            # Parse response to find open interest for coin
-            # Response is typically [meta, assetCtxs]
-            asset_ctxs = []
-            if isinstance(data, list) and len(data) == 2 and isinstance(data[1], list):
-                asset_ctxs = data[1]
-            elif isinstance(data, list):
-                # Fallback or direct list
-                asset_ctxs = data
+            # Response is [universe, assetCtxs]
+            if not isinstance(data, list) or len(data) != 2:
+                logger.warning("Unexpected response format for metaAndAssetCtxs")
+                return 0.0
 
-            for asset in asset_ctxs:
-                # Skip if asset is not a dict (e.g. if we are iterating over the wrong list)
-                if not isinstance(asset, dict):
-                    continue
-                    
-                if asset.get("coin") == coin or asset.get("symbol") == coin:
-                    return float(asset.get("openInterest", 0))
+            # Handle universe structure (it might be wrapped in a dict)
+            universe_data = data[0]
+            if isinstance(universe_data, dict) and "universe" in universe_data:
+                universe = universe_data["universe"]
+            else:
+                universe = universe_data
 
-            logger.warning(f"Open interest not found for {coin}")
-            return 0.0
+            asset_ctxs = data[1]
+
+            # Find index of coin in universe
+            coin_index = -1
+            for i, asset_meta in enumerate(universe):
+                if asset_meta.get("name") == coin:
+                    coin_index = i
+                    break
+            
+            if coin_index == -1:
+                logger.warning(f"Coin {coin} not found in universe")
+                return 0.0
+            
+            if coin_index >= len(asset_ctxs):
+                logger.warning(f"Asset context missing for {coin} at index {coin_index}")
+                return 0.0
+
+            # Get context from parallel array
+            ctx = asset_ctxs[coin_index]
+            return float(ctx.get("openInterest", 0))
 
         except Exception as e:
             logger.error(f"Failed to fetch open interest: {e}")
@@ -295,25 +308,38 @@ class HyperliquidClient:
         try:
             data = self._post("/info", payload)
 
-            # Parse response to find funding rate for coin
-            # Response is typically [meta, assetCtxs]
-            asset_ctxs = []
-            if isinstance(data, list) and len(data) == 2 and isinstance(data[1], list):
-                asset_ctxs = data[1]
-            elif isinstance(data, list):
-                # Fallback or direct list
-                asset_ctxs = data
+            # Response is [universe, assetCtxs]
+            if not isinstance(data, list) or len(data) != 2:
+                logger.warning("Unexpected response format for metaAndAssetCtxs")
+                return 0.0
 
-            for asset in asset_ctxs:
-                # Skip if asset is not a dict
-                if not isinstance(asset, dict):
-                    continue
+            # Handle universe structure (it might be wrapped in a dict)
+            universe_data = data[0]
+            if isinstance(universe_data, dict) and "universe" in universe_data:
+                universe = universe_data["universe"]
+            else:
+                universe = universe_data
 
-                if asset.get("coin") == coin or asset.get("symbol") == coin:
-                    return float(asset.get("funding", 0))
+            asset_ctxs = data[1]
 
-            logger.warning(f"Funding rate not found for {coin}")
-            return 0.0
+            # Find index of coin in universe
+            coin_index = -1
+            for i, asset_meta in enumerate(universe):
+                if asset_meta.get("name") == coin:
+                    coin_index = i
+                    break
+            
+            if coin_index == -1:
+                logger.warning(f"Coin {coin} not found in universe")
+                return 0.0
+            
+            if coin_index >= len(asset_ctxs):
+                logger.warning(f"Asset context missing for {coin} at index {coin_index}")
+                return 0.0
+
+            # Get context from parallel array
+            ctx = asset_ctxs[coin_index]
+            return float(ctx.get("funding", 0))
 
         except Exception as e:
             logger.error(f"Failed to fetch funding rate: {e}")

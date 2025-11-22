@@ -1,130 +1,362 @@
-# LLM Configuration (Model-Centric Design)
-# Define available model pool - which models to run is controlled in database
+# Trading Bot Configuration
+# Environment switching: Change 'environment' to switch between testnet/mainnet/dry-run
 
+# ============================================================================
+# ENVIRONMENT SELECTION - Change this to switch modes
+# ============================================================================
+environment: 'testnet'  # Options: 'dry-run' | 'testnet' | 'mainnet'
+
+# Dry-run mode: Test without real money
+# - Uses real market data from mainnet/testnet
+# - Generates real AI decisions
+# - Simulates trade execution (no real orders)
+# - Perfect for integration testing
+
+# ============================================================================
+# DRY-RUN MODE SETTINGS
+# ============================================================================
+dry_run:
+  enabled: false  # Master switch for dry-run mode (overridden by environment setting)
+
+  # Which API to use for market data in dry-run
+  data_source: 'mainnet'  # 'mainnet' | 'testnet'
+
+  # Simulation settings
+  simulate_order_fill: true  # Simulate immediate fills
+  simulate_slippage: 0.001   # 0.1% slippage simulation
+  simulate_latency_ms: 100   # Simulate 100ms API latency
+
+  # Logging
+  log_simulated_trades: true  # Log all "would-be" trades
+  save_dry_run_results: true  # Save results to database for analysis
+
+# ============================================================================
+# HYPERLIQUID CONFIGURATION
+# ============================================================================
+hyperliquid:
+  # URLs (automatically selected based on environment)
+  mainnet_url: 'https://api.hyperliquid.xyz'
+  testnet_url: 'https://api.hyperliquid-testnet.xyz'
+
+  # Accounts Configuration (Multi-Wallet Support)
+  # Define your wallets here and reference them in the 'agents' section
+  accounts:
+    - name: 'default_wallet'
+      private_key: '${HYPERLIQUID_PRIVATE_KEY_DEFAULT}'
+      vault_address: null  # Optional: Set if using a subaccount
+
+    - name: 'risk_wallet'
+      private_key: '${HYPERLIQUID_PRIVATE_KEY_RISK}'
+      vault_address: null
+
+    - name: 'trend_wallet'
+      private_key: '${HYPERLIQUID_PRIVATE_KEY_TREND}'
+      vault_address: null
+
+    - name: 'momentum_wallet'
+      private_key: '${HYPERLIQUID_PRIVATE_KEY_MOMENTUM}'
+      vault_address: null
+
+  # API settings
+  timeout: 10  # Request timeout in seconds
+  max_retries: 3
+  retry_delay: 2
+
+  # Safety limits (applied in all modes)
+  max_position_size: 1.0  # Max position size in base currency
+  max_leverage: 5         # Max leverage allowed
+  max_daily_trades: 50    # Max trades per day per agent
+
+# ============================================================================
+# LLM CONFIGURATION
+# ============================================================================
 llm:
-  # Available model pool - each model can use different service providers
   models:
     deepseek-chat:
-      # Which provider to use for this model: 'official' | 'openrouter'
       provider: 'official'
 
-      # Official DeepSeek API configuration
       official:
         base_url: 'https://api.deepseek.com/v1'
-        api_key: 'YOUR_DEEPSEEK_API_KEY'  # Get from https://platform.deepseek.com/
+        api_key: '${DEEPSEEK_API_KEY}'
         model_name: 'deepseek-chat'
         timeout: 30
         pricing:
           input: '$0.27/1M tokens'
           output: '$1.10/1M tokens'
-          cache: '$0.027/1M tokens (90% discount)'
-
-      # OpenRouter configuration (alternative provider for same model)
-      openrouter:
-        base_url: 'https://openrouter.ai/api/v1'
-        api_key: 'YOUR_OPENROUTER_API_KEY'  # Get from https://openrouter.ai/keys
-        model_name: 'deepseek/deepseek-chat'
-        timeout: 30
-        pricing:
-          input: '$0.27/1M tokens'
-          output: '$1.10/1M tokens'
+          cache: '$0.027/1M tokens'
 
     qwen-plus:
       provider: 'official'
 
       official:
         base_url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
-        api_key: 'YOUR_QWEN_API_KEY'  # Get from https://help.aliyun.com/zh/dashscope/
+        api_key: '${QWEN_API_KEY}'
         model_name: 'qwen-plus'
         timeout: 30
-        pricing:
-          input_output: '¥0.0008/1K tokens'
 
-      openrouter:
-        base_url: 'https://openrouter.ai/api/v1'
-        api_key: 'YOUR_OPENROUTER_API_KEY'
-        model_name: 'qwen/qwen-2.5-72b-instruct'
-        timeout: 30
-        pricing:
-          input: '$0.54/1M tokens'
-          output: '$2.24/1M tokens'
+  # Common settings (统一配置)
+  max_tokens: 500
+  temperature: 0.3  # 最稳定的设置，适合生产环境
 
-    # Example: Additional model accessible only via OpenRouter
-    claude-3-5-sonnet:
-      provider: 'openrouter'
-
-      openrouter:
-        base_url: 'https://openrouter.ai/api/v1'
-        api_key: 'YOUR_OPENROUTER_API_KEY'
-        model_name: 'anthropic/claude-3.5-sonnet'
-        timeout: 30
-
-  # Common LLM settings
-  max_tokens: 4096
-  temperature: 0.7
-
-# HyperLiquid Configuration
-exchange:
-  testnet: true  # Use testnet for development
-  mainnet_url: 'https://api.hyperliquid.xyz'
-  testnet_url: 'https://api.hyperliquid-testnet.xyz'
-
-  # Multiple account support - each agent uses one account
-  accounts:
-    account_1:
-      account_id: '0x1234...'  # Your HyperLiquid account address
-      api_key: '${HYPERLIQUID_KEY_1}'
-      api_secret: '${HYPERLIQUID_SECRET_1}'
-
-    account_2:
-      account_id: '0x5678...'
-      api_key: '${HYPERLIQUID_KEY_2}'
-      api_secret: '${HYPERLIQUID_SECRET_2}'
-
-    # Add more accounts as needed...
-
-# Trading Configuration
+# ============================================================================
+# TRADING CONFIGURATION
+# ============================================================================
 trading:
-  interval_minutes: 3  # AI decision interval
-  coins: ['BTC', 'ETH', 'SOL', 'BNB', 'DOGE', 'XRP']
-  kline_limit_3m: 30
-  kline_limit_4h: 24
+  # Trading cycle
+  interval_minutes: 3  # Execute every 3 minutes (NoF1.ai style)
 
-# Database Configuration
+  # Markets to trade
+  coins: ['BTC', 'ETH', 'SOL', 'BNB', 'DOGE']
+
+  # Data collection
+  kline_limit_3m: 100   # Last 100 x 3min candles (300 minutes)
+  kline_limit_4h: 100   # Last 100 x 4h candles (16 days)
+
+  # Risk management
+  max_position_per_agent: 0.5  # Max position as % of balance
+  stop_loss_percentage: 5.0     # Default stop loss %
+  take_profit_percentage: 10.0  # Default take profit %
+
+# ============================================================================
+# AI AGENTS CONFIGURATION
+# ============================================================================
+# 说明：
+# - temperature 统一为 0.3（最稳定）
+# - 通过 strategy_description 定义不同策略
+# - 保留一个 Default Agent（无策略描述）作为基准对照
+# ============================================================================
+
+agents:
+  # ========================================================================
+  # Default Agent - 基准对照组（无自定义策略）
+  # ========================================================================
+  # 使用系统默认的通用提示词，不添加任何特定策略描述
+  # 用于对比有策略 vs 无策略的差异
+  - name: 'Default Agent'
+    account: 'default_wallet'
+    enabled: true
+    provider: 'deepseek'
+    model: 'deepseek-chat'
+    temperature: 0.3
+    max_tokens: 500
+    description: 'Baseline agent with no specific strategy'
+    # 注意：不设置 strategy_description，使用系统默认提示词
+
+  # ========================================================================
+  # Trend Following Agent - 趋势跟踪策略
+  # ========================================================================
+  - name: 'Trend Follower'
+    account: 'trend_wallet'
+    enabled: false  # 默认关闭，按需启用
+    provider: 'deepseek'
+    model: 'deepseek-chat'
+    temperature: 0.3
+    max_tokens: 500
+    description: 'Trend following strategy'
+    strategy_description: |
+      You are a TREND FOLLOWING trader. Your core principles:
+
+      1. Trading Philosophy:
+         - Only trade in the direction of strong trends
+         - Wait for clear trend confirmation before entering
+         - Ride trends as long as they remain intact
+         - Cut losses quickly when trend reverses
+
+      2. Entry Rules:
+         - LONG: Price above SMA(20) AND SMA(50), MACD bullish crossover, RSI > 50
+         - SHORT: Price below SMA(20) AND SMA(50), MACD bearish crossover, RSI < 50
+         - HOLD: No clear trend or conflicting signals
+
+      3. Risk Management:
+         - Position size: 30-50% of account
+         - Stop loss: Below recent swing low (LONG) or above swing high (SHORT)
+         - Take profit: Trail stop until trend reversal signals
+         - Leverage: 2-3x maximum
+
+      4. Indicator Priority:
+         1. SMA crossovers (most important)
+         2. MACD trend confirmation
+         3. RSI for momentum
+         4. ATR for stop loss placement
+
+  # ========================================================================
+  # Mean Reversion Agent - 均值回归策略
+  # ========================================================================
+  - name: 'Mean Reverter'
+    account: 'risk_wallet'
+    enabled: false  # 默认关闭，按需启用
+    provider: 'deepseek'
+    model: 'deepseek-chat'
+    temperature: 0.3
+    max_tokens: 500
+    description: 'Mean reversion strategy'
+    strategy_description: |
+      You are a MEAN REVERSION trader. Your core principles:
+
+      1. Trading Philosophy:
+         - Trade against short-term extremes
+         - Buy oversold conditions, sell overbought conditions
+         - Profit from market overreactions
+         - Take quick profits when price returns to mean
+
+      2. Entry Rules:
+         - LONG: RSI < 30 (oversold), price 5%+ below SMA(20), volume spike
+         - SHORT: RSI > 70 (overbought), price 5%+ above SMA(20), volume spike
+         - HOLD: RSI between 30-70 (normal range)
+
+      3. Risk Management:
+         - Position size: 20-30% of account (conservative)
+         - Stop loss: Tight stops (2-3% from entry)
+         - Take profit: Quick exits when price returns to SMA(20)
+         - Leverage: 1-2x maximum (lower risk)
+
+      4. Indicator Priority:
+         1. RSI extremes (most important)
+         2. Distance from SMA(20)
+         3. Volume spikes
+         4. Support/resistance levels
+
+  # ========================================================================
+  # Momentum Breakout Agent - 动量突破策略
+  # ========================================================================
+  - name: 'Momentum Breakout'
+    account: 'momentum_wallet'
+    enabled: false  # 默认关闭，按需启用
+    provider: 'deepseek'
+    model: 'deepseek-chat'
+    temperature: 0.3
+    max_tokens: 500
+    description: 'Momentum breakout strategy'
+    strategy_description: |
+      You are a MOMENTUM BREAKOUT trader. Your core principles:
+
+      1. Trading Philosophy:
+         - Trade explosive price movements
+         - Enter on confirmed breakouts with volume
+         - Capture large moves in short time
+         - Exit quickly if breakout fails
+
+      2. Entry Rules:
+         - LONG: Price breaks above recent high, volume > 2x average, RSI > 60, MACD positive
+         - SHORT: Price breaks below recent low, volume > 2x average, RSI < 40, MACD negative
+         - HOLD: No breakout setup or low volume
+
+      3. Risk Management:
+         - Position size: 40-60% of account (aggressive on confirmed signals)
+         - Stop loss: Just below breakout level (2-4%)
+         - Take profit: Trail stop, exit on momentum loss
+         - Leverage: 3-5x on strong setups
+
+      4. Indicator Priority:
+         1. Volume confirmation (critical!)
+         2. Price breakout level
+         3. MACD acceleration
+         4. RSI momentum
+
+# ============================================================================
+# DATABASE CONFIGURATION
+# ============================================================================
 database:
-  host: localhost
-  port: 5432
-  database: trading_bot
-  user: ${DB_USER}
-  password: ${DB_PASSWORD}
+  # Use environment variables for credentials
+  url: 'postgresql://${DB_USER}:${DB_PASSWORD}@localhost:5432/${DB_NAME}'
+
+  # Connection pool
   pool_size: 10
   max_overflow: 20
+  pool_timeout: 30
+  pool_recycle: 3600
 
-# Which LLM agents to run? Managed in database (trading_agents table)
-# Example CLI commands:
-#
-# Create an agent:
-#   bot agent create \
-#     --name "DeepSeek Agent" \
-#     --model deepseek-chat \
-#     --account account_1 \
-#     --balance 10000.0
-#
-# Create another agent with different model and account:
-#   bot agent create \
-#     --name "Qwen Agent" \
-#     --model qwen-plus \
-#     --account account_2 \
-#     --balance 10000.0
-#
-# List agents:
-#   bot agent list
-#
-# Pause an agent:
-#   bot agent pause <agent-id>
-#
-# View agent performance:
-#   bot agent stats <agent-id>
-#
-# Note: Agent references model and account names defined above
-# API keys are never stored in database - they stay in config.yaml
+# ============================================================================
+# MONITORING & ALERTS
+# ============================================================================
+monitoring:
+  # Performance monitoring
+  performance:
+    enabled: true
+    track_cycle_time: true
+    track_api_latency: true
+
+  # Account monitoring
+  account:
+    enabled: true
+    check_balance: true
+    check_liquidation_risk: true
+    min_balance_alert: 100.0  # Alert if balance < $100
+
+  # Alert system
+  alerts:
+    console: true
+    log_file: true
+
+    # Telegram (optional)
+    telegram:
+      enabled: false
+      bot_token: '${TELEGRAM_BOT_TOKEN}'
+      chat_id: '${TELEGRAM_CHAT_ID}'
+
+    # Email (optional)
+    email:
+      enabled: false
+      smtp_host: 'smtp.gmail.com'
+      smtp_port: 587
+      username: '${EMAIL_USERNAME}'
+      password: '${EMAIL_PASSWORD}'
+      from_email: '${EMAIL_FROM}'
+      to_emails: ['${EMAIL_TO}']
+
+# ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
+logging:
+  level: 'INFO'  # DEBUG | INFO | WARNING | ERROR | CRITICAL
+
+  # File paths
+  log_dir: 'logs'
+  main_log: 'logs/trading_bot.log'
+  error_log: 'logs/trading_bot_error.log'
+
+  # Rotation
+  rotation: '1 day'
+  retention: '30 days'
+  compression: 'zip'
+
+  # Format
+  json_format: false
+  colorize_console: true
+
+# ============================================================================
+# ENVIRONMENT-SPECIFIC OVERRIDES
+# ============================================================================
+# These sections override base config based on selected environment
+
+environments:
+  # Dry-run mode (default)
+  dry-run:
+    dry_run:
+      enabled: true
+    hyperliquid:
+      # Can use mainnet API for real market data, but won't execute trades
+      active_url: 'mainnet_url'  # or 'testnet_url'
+    logging:
+      level: 'DEBUG'
+
+  # Testnet mode (when faucet works again)
+  testnet:
+    dry_run:
+      enabled: false  # Real trades on testnet
+    hyperliquid:
+      active_url: 'testnet_url'
+    logging:
+      level: 'INFO'
+
+  # Mainnet mode (production)
+  mainnet:
+    dry_run:
+      enabled: false  # Real trades with real money
+    hyperliquid:
+      active_url: 'mainnet_url'
+    logging:
+      level: 'WARNING'
+    # Extra safety checks for mainnet
+    safety_confirmations: true
+    require_manual_approval: true  # Require confirmation for large trades

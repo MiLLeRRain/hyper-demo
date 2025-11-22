@@ -323,26 +323,79 @@ class TradingBotService:
         try:
             logger.info("Initializing Phase 3 components...")
 
-            # HyperLiquid executor (one per service, can be shared by multiple agents)
-            # In production, each agent should have its own executor with its own private key
-            # For now, we'll use a single executor
-            self.executor = HyperLiquidExecutor(
-                base_url=self.config.hyperliquid.exchange_url,
-                private_key=self.config.hyperliquid.private_key,
-                dry_run=self.config.dry_run.enabled,
-                timeout=self.config.hyperliquid.timeout
-            )
+            # Initialize executors for all configured accounts
+            self.executors = {}
+            
+            # Identify accounts used by enabled agents
+            enabled_accounts = {
+                agent.account 
+                for agent in self.config.agents 
+                if agent.enabled and agent.account
+            }
+            
+            # 1. Load from new 'accounts' list
+            if self.config.hyperliquid.accounts:
+                for account in self.config.hyperliquid.accounts:
+                    # Skip initialization if account is not used by any enabled agent
+                    if account.name not in enabled_accounts:
+                        logger.info(f"Skipping initialization for unused account: {account.name}")
+                        continue
 
-            # Order manager
+                    try:
+                        executor = HyperLiquidExecutor(
+                            base_url=self.config.hyperliquid.exchange_url,
+                            private_key=account.private_key,
+                            vault_address=account.vault_address,
+                            dry_run=self.config.dry_run.enabled,
+                            timeout=self.config.hyperliquid.timeout
+                        )
+                        self.executors[account.name] = executor
+                        logger.info(f"Initialized executor for account: {account.name}")
+                    except Exception as e:
+                        logger.error(f"Failed to initialize executor for {account.name}: {e}")
+
+            # 2. Fallback to legacy 'private_key' if no accounts or specific legacy config
+            if not self.executors and self.config.hyperliquid.private_key:
+                logger.info("Using legacy single-account configuration")
+                self.executors['default'] = HyperLiquidExecutor(
+                    base_url=self.config.hyperliquid.exchange_url,
+                    private_key=self.config.hyperliquid.private_key,
+                    vault_address=self.config.hyperliquid.vault_address,
+                    dry_run=self.config.dry_run.enabled,
+                    timeout=self.config.hyperliquid.timeout
+                )
+
+            if not self.executors:
+                raise ValueError("No valid trading accounts configured! Check config.yaml")
+
+            # Set primary executor (for backward compatibility)
+            self.executor = next(iter(self.executors.values()))
+
+            # Order manager (needs to be aware of multiple executors, or we pass orchestrator)
+            # For now, OrderManager might need refactoring, but let's see.
+            # Actually, OrderManager takes 'executor'. We might need to update it too.
+            # Or better, TradingOrchestrator handles the routing, and OrderManager just executes?
+            # No, OrderManager executes. So OrderManager needs the map or Orchestrator passes the right executor.
+            
+            # Let's pass the map to TradingOrchestrator, and let it handle the routing.
+            # But OrderManager is initialized here.
+            
+            # Temporary fix: OrderManager still takes one executor (the default one).
+            # We will update TradingOrchestrator to use the map and pass the right executor to OrderManager methods?
+            # Or create multiple OrderManagers?
+            
+            # Let's update TradingOrchestrator to take the map.
+            
             self.order_manager = OrderManager(
-                executor=self.executor,
+                executor=self.executor, # Default one
                 db_session=self.db_session
             )
 
             # Position manager
             self.position_manager = PositionManager(
                 info_client=self.info_client,
-                db_session=self.db_session
+                db_session=self.db_session,
+                executor=self.executor # Default one
             )
 
             # Risk manager
@@ -353,7 +406,8 @@ class TradingBotService:
 
             # Trading orchestrator
             self.trading_orchestrator = TradingOrchestrator(
-                executor=self.executor,
+                executors=self.executors, # Pass the map!
+                default_executor=self.executor,
                 order_manager=self.order_manager,
                 position_manager=self.position_manager,
                 risk_manager=self.risk_manager,

@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent.parent
@@ -45,17 +46,17 @@ def status_cmd(json_output: bool, verbose: bool):
 def _get_service_status() -> dict:
     """Get service status from database."""
     # Import here to avoid circular imports
-    from trading_bot.config.models import Config
+    from trading_bot.config.models import load_config
     from trading_bot.automation.state_manager import StateManager
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    import yaml
 
     try:
+        # Load environment variables
+        load_dotenv()
+
         # Load config
-        with open('config.yaml', encoding='utf-8') as f:
-            config_data = yaml.safe_load(f)
-        cfg = Config(**config_data)
+        cfg = load_config('config.yaml')
 
         # Connect to database
         engine = create_engine(cfg.database.url)

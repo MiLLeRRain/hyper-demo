@@ -74,7 +74,7 @@ def check_env_file():
 
     # Check required variables
     required_vars = {
-        "HYPERLIQUID_PRIVATE_KEY": "HyperLiquid wallet private key",
+        "HYPERLIQUID_PRIVATE_KEY_DEFAULT": "HyperLiquid wallet private key (Default)",
         "DEEPSEEK_API_KEY": "DeepSeek API key (or OPENAI_API_KEY)"
     }
 
@@ -207,7 +207,7 @@ def check_hyperliquid_api():
             return False
 
         # Test wallet address derivation
-        private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY")
+        private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY_DEFAULT")
         if private_key:
             print_info("Checking wallet address...")
 
@@ -232,7 +232,7 @@ def check_hyperliquid_api():
 
             except Exception as e:
                 print_error(f"Failed to derive wallet address: {e}")
-                print_info("Check your HYPERLIQUID_PRIVATE_KEY in .env")
+                print_info("Check your HYPERLIQUID_PRIVATE_KEY_DEFAULT in .env")
 
         return True
 

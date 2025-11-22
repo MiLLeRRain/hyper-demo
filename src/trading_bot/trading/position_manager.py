@@ -15,6 +15,7 @@ from sqlalchemy import func
 from ..models.database import AgentTrade, TradingAgent
 from ..models.market_data import Position, AccountInfo
 from ..data.hyperliquid_client import HyperliquidClient
+from .hyperliquid_executor import HyperLiquidExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -29,47 +30,42 @@ class PositionManager:
     Attributes:
         info_client: HyperLiquid Info API client for market data
         db: SQLAlchemy database session
+        executor: Optional HyperLiquidExecutor for fetching user state
     """
 
     def __init__(
         self,
         info_client: HyperliquidClient,
-        db_session: Session
+        db_session: Session,
+        executor: Optional[HyperLiquidExecutor] = None
     ):
         """Initialize position manager.
 
         Args:
             info_client: HyperLiquid Info API client
             db_session: Database session
+            executor: Optional HyperLiquidExecutor for user state
 
         Example:
             >>> client = HyperliquidClient("https://api.hyperliquid.xyz")
             >>> db_session = Session()
-            >>> manager = PositionManager(client, db_session)
+            >>> manager = PositionManager(client, db_session, executor)
         """
         self.info_client = info_client
         self.db = db_session
+        self.executor = executor
         logger.info("PositionManager initialized")
 
-    def get_current_positions(self, agent_id: UUID) -> List[Position]:
+    def get_current_positions(
+        self,
+        agent_id: UUID,
+        executor: Optional[HyperLiquidExecutor] = None
+    ) -> List[Position]:
         """Get current open positions for an agent.
-
-        This method:
-        1. Queries all open trades from database
-        2. Fetches current market prices
-        3. Calculates unrealized P&L
-        4. Returns Position objects with current data
 
         Args:
             agent_id: Trading agent ID
-
-        Returns:
-            List of Position objects with current market data
-
-        Example:
-            >>> positions = manager.get_current_positions(agent_id)
-            >>> for pos in positions:
-            ...     print(f"{pos.coin}: {pos.unrealized_pnl} USD")
+            executor: Specific executor to use for fetching user state
         """
         # Query open trades from database
         open_trades = self.db.query(AgentTrade).filter_by(
@@ -77,39 +73,92 @@ class PositionManager:
             status="open"
         ).all()
 
+        # Use specific executor if provided, else default
+        active_executor = executor or self.executor
+
+        # Fetch user state from exchange if executor is available
+        exchange_positions = {}
+        if active_executor and not active_executor.dry_run:
+            try:
+                user_state = active_executor.info.user_state(active_executor.wallet_address)
+                for asset_pos in user_state.get("assetPositions", []):
+                    pos_data = asset_pos.get("position", {})
+                    coin = pos_data.get("coin")
+                    if coin:
+                        exchange_positions[coin] = pos_data
+            except Exception as e:
+                logger.error(f"Failed to fetch user state: {e}")
+
         positions = []
         for trade in open_trades:
             try:
+                # Get exchange data for this coin
+                exch_pos = exchange_positions.get(trade.coin, {})
+                
+                # SYNC CHECK: If exchange says size is 0, but DB says open, it means it was closed externally
+                # (e.g. liquidation, TP/SL, or manual close)
+                exch_size = float(exch_pos.get("szi", 0)) if exch_pos else 0.0
+                
+                if active_executor and not active_executor.dry_run and exch_size == 0:
+                    logger.warning(
+                        f"Position mismatch for {trade.coin}: DB has {trade.size}, Exchange has 0. "
+                        f"Marking trade {trade.id} as closed."
+                    )
+                    # Auto-close the trade in DB
+                    trade.status = "closed"
+                    trade.exit_time = datetime.utcnow()
+                    trade.notes = (trade.notes or "") + " [Auto-closed by PositionManager sync]"
+                    self.db.commit()
+                    continue  # Skip adding to positions list
+
                 # Get current market price
                 price_obj = self.info_client.get_price(trade.coin)
                 current_price = Decimal(str(price_obj.price))
 
+                # Determine entry price: prefer exchange data, fallback to DB, then 0
+                if exch_pos and "entryPx" in exch_pos:
+                    entry_price = Decimal(str(exch_pos["entryPx"]))
+                elif trade.entry_price is not None:
+                    entry_price = trade.entry_price
+                else:
+                    logger.warning(f"Trade {trade.id} for {trade.coin} has no entry price. Using 0.")
+                    entry_price = Decimal("0")
+
                 # Calculate unrealized PnL
+                # If we have exchange data, we can use it directly if the size matches
+                # But since we might have partial positions, we calculate based on trade size
                 if trade.side == "long":
                     # Long: profit when price goes up
-                    unrealized_pnl = trade.size * (current_price - trade.entry_price)
+                    unrealized_pnl = trade.size * (current_price - entry_price)
                 else:  # short
                     # Short: profit when price goes down
-                    unrealized_pnl = trade.size * (trade.entry_price - current_price)
+                    unrealized_pnl = trade.size * (entry_price - current_price)
 
-                # Get leverage from agent config
-                agent = self.db.query(TradingAgent).filter_by(id=agent_id).first()
-                leverage = agent.max_leverage if agent else 10
+                # Get leverage from agent config or exchange
+                if exch_pos and "leverage" in exch_pos:
+                    leverage = int(exch_pos["leverage"].get("value", 10))
+                else:
+                    agent = self.db.query(TradingAgent).filter_by(id=agent_id).first()
+                    leverage = agent.max_leverage if agent else 10
 
                 # Calculate position value
                 position_value = trade.size * current_price
 
-                # Calculate liquidation price (simplified)
-                if trade.side == "long":
-                    liquidation_price = float(trade.entry_price) * (1 - 1 / leverage)
+                # Calculate liquidation price
+                if exch_pos and "liquidationPx" in exch_pos and exch_pos["liquidationPx"]:
+                    liquidation_price = float(exch_pos["liquidationPx"])
                 else:
-                    liquidation_price = float(trade.entry_price) * (1 + 1 / leverage)
+                    # Simplified calculation
+                    if trade.side == "long":
+                        liquidation_price = float(entry_price) * (1 - 1 / leverage)
+                    else:
+                        liquidation_price = float(entry_price) * (1 + 1 / leverage)
 
                 position = Position(
                     coin=trade.coin,
                     side=trade.side,
                     size=float(trade.size),
-                    entry_price=float(trade.entry_price),
+                    entry_price=float(entry_price),
                     mark_price=float(current_price),
                     position_value=float(position_value),
                     unrealized_pnl=float(unrealized_pnl),
@@ -120,7 +169,7 @@ class PositionManager:
 
                 logger.debug(
                     f"Position: {trade.coin} {trade.side} "
-                    f"{trade.size} @ {trade.entry_price} "
+                    f"{trade.size} @ {entry_price} "
                     f"(Current: {current_price}, PnL: {unrealized_pnl})"
                 )
 
@@ -163,38 +212,66 @@ class PositionManager:
         """
         return self.get_position(agent_id, coin) is not None
 
-    def get_account_value(self, agent_id: UUID) -> AccountInfo:
+    def get_account_value(
+        self,
+        agent_id: UUID,
+        executor: Optional[HyperLiquidExecutor] = None
+    ) -> AccountInfo:
         """Calculate agent's account value and metrics.
-
-        This provides a comprehensive view of the agent's account including:
-        - Total account value (balance + P&L)
-        - Cash balance available
-        - Total position value
-        - Unrealized P&L (current positions)
-        - Realized P&L (closed positions)
-        - Available margin
 
         Args:
             agent_id: Trading agent ID
-
-        Returns:
-            AccountInfo object with all account metrics
-
-        Raises:
-            ValueError: If agent not found
-
-        Example:
-            >>> account = manager.get_account_value(agent_id)
-            >>> print(f"Total value: ${account.total_value}")
-            >>> print(f"Available margin: ${account.available_margin}")
+            executor: Specific executor to use
         """
         agent = self.db.query(TradingAgent).filter_by(id=agent_id).first()
 
         if not agent:
             raise ValueError(f"Agent not found: {agent_id}")
 
+        # Try to get live account value from exchange if executor is available
+        active_executor = executor or self.executor
+        
+        if active_executor:
+            logger.info(f"Checking account value for agent {agent.name} using wallet {active_executor.wallet_address} (Dry Run: {active_executor.dry_run})")
+            
+        if active_executor and not active_executor.dry_run:
+            try:
+                user_state = active_executor.info.user_state(active_executor.wallet_address)
+                logger.debug(f"Raw user state for {active_executor.wallet_address}: {user_state}")
+                
+                margin_summary = user_state.get("marginSummary", {})
+                
+                account_value = float(margin_summary.get("accountValue", 0.0))
+                
+                # Withdrawable is usually at top level, but check both
+                withdrawable = float(user_state.get("withdrawable", margin_summary.get("withdrawable", 0.0)))
+                
+                margin_used = float(margin_summary.get("totalMarginUsed", 0.0))
+                
+                # Calculate unrealized PnL from positions
+                positions = self.get_current_positions(agent_id, executor=active_executor)
+                unrealized_pnl = sum(pos.unrealized_pnl for pos in positions)
+                
+                account_info = AccountInfo(
+                    account_value=account_value,
+                    withdrawable=withdrawable,
+                    margin_used=margin_used,
+                    unrealized_pnl=unrealized_pnl
+                )
+                
+                logger.info(
+                    f"Live account value for {agent_id} ({agent.name}): "
+                    f"Total=${account_value}, Withdrawable=${withdrawable}, "
+                    f"Margin=${margin_used}, uPnL=${unrealized_pnl}"
+                )
+                return account_info
+                
+            except Exception as e:
+                logger.error(f"Failed to fetch live account value for {agent.name}: {e}", exc_info=True)
+                # Fallback to calculated value
+
         # Get all open positions
-        positions = self.get_current_positions(agent_id)
+        positions = self.get_current_positions(agent_id, executor=executor)
 
         # Calculate total position value (notional value)
         position_value = sum(
@@ -217,13 +294,14 @@ class PositionManager:
         # Calculate total account value
         account_value = float(agent.initial_balance) + float(realized_pnl) + unrealized_pnl
 
-        # Calculate withdrawable (cash not in positions)
-        withdrawable = account_value - position_value
-
         # Calculate margin used (simplified)
         # For cross margin, margin_used = sum(position_value / leverage)
         # Simplified: assume max leverage for all positions
         margin_used = position_value / (agent.max_leverage if agent.max_leverage > 0 else 1)
+
+        # Calculate withdrawable (cash not in positions)
+        # Withdrawable is Equity - Margin Used
+        withdrawable = account_value - margin_used
 
         account_info = AccountInfo(
             account_value=float(account_value),

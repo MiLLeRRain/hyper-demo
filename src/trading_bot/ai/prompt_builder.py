@@ -2,31 +2,25 @@
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from trading_bot.models.database import TradingAgent
-from trading_bot.models.market_data import AccountInfo, Position
+from trading_bot.models.market_data import AccountInfo, Position, MarketData
 
 logger = logging.getLogger(__name__)
 
 
 class PromptBuilder:
-    """Builds NoF1.ai-style prompts (~11k characters) for trading agents.
+    """Builds NoF1.ai-style prompts for trading agents.
 
-    The prompt includes:
-    - Header (current time, system role)
-    - Portfolio section (account balance, positions, PnL)
-    - Market data section (6 coins: BTC, ETH, SOL, BNB, DOGE, XRP)
-    - Technical indicators (3m and 4h timeframes: EMA, MACD, RSI, ATR)
-    - Risk constraints
-    - Task requirements (JSON output format)
+    The prompt strictly follows the NoF1.ai specification:
+    - Header (time, invocation count)
+    - Market Data (Intraday series, 4h context)
+    - Account Information
     """
 
     # Coins to include in market data
     COINS = ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP"]
-
-    # Timeframes for technical indicators
-    TIMEFRAMES = ["3m", "4h"]
 
     def __init__(self):
         """Initialize the Prompt Builder."""
@@ -34,36 +28,37 @@ class PromptBuilder:
 
     def build(
         self,
-        market_data: Dict[str, Dict[str, Any]],
+        market_data: Dict[str, MarketData],
         positions: List[Position],
         account: AccountInfo,
-        agent: TradingAgent
+        agent: TradingAgent,
+        start_time: Optional[datetime] = None,
+        invocation_count: int = 0
     ) -> str:
         """Build a complete prompt for the trading agent.
 
         Args:
             market_data: Dictionary of market data for each coin
-                Format: {
-                    "BTC": {
-                        "price": 50000.0,
-                        "3m": {"ema": ..., "macd": ..., "rsi": ..., "atr": ...},
-                        "4h": {"ema": ..., "macd": ..., "rsi": ..., "atr": ...},
-                    },
-                    ...
-                }
             positions: List of current positions
-            account: Account information (balance, margin, etc.)
+            account: Account information
             agent: Trading agent configuration
+            start_time: Time when the bot started trading
+            invocation_count: Number of times the agent has been invoked
 
         Returns:
-            Complete prompt string (~11k characters)
+            Complete prompt string
         """
+        # Calculate minutes elapsed
+        if start_time:
+            minutes_elapsed = int((datetime.utcnow() - start_time).total_seconds() / 60)
+        else:
+            minutes_elapsed = 0
+
         sections = [
-            self._build_header(agent),
-            self._build_portfolio_section(account, positions),
+            self._build_header(minutes_elapsed, invocation_count),
             self._build_market_data_section(market_data),
-            self._build_constraints_section(agent),
-            self._build_task_section(),
+            self._build_account_section(account, positions, agent),
+            self._build_system_instruction()
         ]
 
         prompt = "\n\n".join(sections)
@@ -76,253 +71,140 @@ class PromptBuilder:
 
         return prompt
 
-    def _build_header(self, agent: TradingAgent) -> str:
-        """Build the header section with current time and agent-specific system role.
+    def _build_header(self, minutes_elapsed: int, invocation_count: int) -> str:
+        """Build the header section."""
+        current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")
+        
+        return f"""It has been {minutes_elapsed} minutes since you started trading. The current time is {current_time} and you've been invoked {invocation_count} times. Below, we are providing you with a variety of state data, price data, and predictive signals so you can discover alpha. Below that is your current account information, value, performance, positions, etc.
 
-        Args:
-            agent: Trading agent configuration (includes strategy description)
+ALL OF THE PRICE OR SIGNAL DATA BELOW IS ORDERED: OLDEST → NEWEST
 
-        Returns:
-            Header section string with personalized system prompt
-        """
-        current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+Timeframes note: Unless stated otherwise in a section title, intraday series are provided at 3‑minute intervals. If a coin uses a different interval, it is explicitly stated in that coin's section."""
 
-        # Base system prompt
-        base_prompt = f"""# HyperLiquid AI Trading System
-Current Time: {current_time}
+    def _build_market_data_section(self, market_data: Dict[str, MarketData]) -> str:
+        """Build the market data section."""
+        section = ""
 
-You are an advanced AI trading agent operating on HyperLiquid DEX, a high-performance decentralized perpetual futures exchange.
-
-Your goal is to maximize portfolio returns while managing risk through strategic perpetual futures trading decisions.
-You have access to real-time market data, technical indicators, and your current portfolio state."""
-
-        # Add agent-specific strategy description if available
-        if agent.strategy_description:
-            base_prompt += f"\n\n**Your Trading Strategy:**\n{agent.strategy_description}"
-
-        return base_prompt
-
-    def _build_portfolio_section(
-        self,
-        account: AccountInfo,
-        positions: List[Position]
-    ) -> str:
-        """Build the portfolio section with account balance and positions.
-
-        Args:
-            account: Account information
-            positions: List of current positions
-
-        Returns:
-            Portfolio section string
-        """
-        section = "## Portfolio Status\n\n"
-
-        # Account balance
-        section += f"**Account Balance:**\n"
-        section += f"- Total Value: ${account.account_value:,.2f}\n"
-        section += f"- Available Balance: ${account.withdrawable:,.2f}\n"
-        section += f"- Margin Used: ${account.margin_used:,.2f}\n"
-        section += f"- Unrealized PnL: ${account.unrealized_pnl:,.2f}\n\n"
-
-        # Current positions
-        if positions:
-            section += f"**Current Positions ({len(positions)}):**\n\n"
-
-            for pos in positions:
-                pnl_pct = (pos.unrealized_pnl / abs(pos.position_value) * 100) if pos.position_value != 0 else 0
-                side_emoji = "🟢" if pos.side == "long" else "🔴"
-
-                section += f"{side_emoji} **{pos.coin}** ({pos.side.upper()})\n"
-                section += f"  - Size: {pos.size} contracts @ ${pos.entry_price:,.2f}\n"
-                section += f"  - Current Price: ${pos.mark_price:,.2f}\n"
-                section += f"  - Position Value: ${pos.position_value:,.2f}\n"
-                section += f"  - Unrealized PnL: ${pos.unrealized_pnl:,.2f} ({pnl_pct:+.2f}%)\n"
-                section += f"  - Leverage: {pos.leverage}x\n"
-                section += f"  - Liquidation Price: ${pos.liquidation_price:,.2f}\n\n"
-        else:
-            section += "**Current Positions:** None (all cash)\n"
-
-        return section
-
-    def _build_market_data_section(
-        self,
-        market_data: Dict[str, Any]
-    ) -> str:
-        """Build the market data section with prices and technical indicators.
-
-        Args:
-            market_data: Market data for each coin
-
-        Returns:
-            Market data section string
-        """
-        section = "## Market Data\n\n"
-
-        for coin in self.COINS:
-            if coin not in market_data:
-                logger.warning(f"Missing market data for {coin}, skipping...")
-                continue
-
+        # Use all coins present in market data
+        sorted_coins = sorted(list(market_data.keys()))
+        
+        for coin in sorted_coins:
             data = market_data[coin]
             
-            # Handle MarketData object or dict
-            if hasattr(data, 'price') and hasattr(data.price, 'price'):
-                current_price = data.price.price
-            else:
-                current_price = data.get('price', 0.0)
-
-            section += f"### {coin}-USD Perpetual\n\n"
-            section += f"**Current Price:** ${current_price:,.2f}\n\n"
-
-            # Technical indicators for each timeframe
-            for tf in self.TIMEFRAMES:
-                # Determine where to get indicators from
-                indicators = {}
-                if hasattr(data, f"indicators_{tf}"):
-                    indicators = getattr(data, f"indicators_{tf}")
-                elif isinstance(data, dict) and tf in data:
-                    indicators = data[tf]
-                else:
-                    logger.warning(f"Missing {tf} data for {coin}, skipping...")
-                    continue
-
-                section += f"**{tf.upper()} Timeframe:**\n"
-                section += f"- EMA(20): ${indicators.get('ema_20', 0):,.2f}\n"
-                section += f"- MACD: {indicators.get('macd', 0):.4f} (Signal: {indicators.get('macd_signal', 0):.4f})\n"
-                section += f"- RSI(14): {indicators.get('rsi_14', 0):.2f}\n"
-                section += f"- ATR(14): ${indicators.get('atr_14', 0):.2f}\n\n"
+            # Extract scalar values
+            current_price = data.price.price
+            ind_3m = data.indicators_3m
+            ind_4h = data.indicators_4h
+            
+            # Format scalar line
+            section += f"\nALL {coin} DATA\n\n"
+            section += f"current_price = {current_price}, current_ema20 = {ind_3m.get('ema_20', 0)}, current_macd = {ind_3m.get('macd', 0)}, current_rsi (7 period) = {ind_3m.get('rsi_7', 0)}\n\n"
+            
+            # Open Interest & Funding
+            oi_latest = data.open_interest if data.open_interest else "N/A"
+            oi_avg = "N/A" # We don't have historical OI yet to calc avg
+            funding = data.funding_rate if data.funding_rate else "N/A"
+            
+            section += f"In addition, here is the latest {coin} open interest and funding rate for perps (the instrument you are trading):\n\n"
+            section += f"Open Interest: Latest: {oi_latest} Average: {oi_avg}\n"
+            section += f"Funding Rate: {funding}\n\n"
+            
+            # Intraday Series (3m)
+            section += "Intraday series (3‑minute intervals, oldest → latest):\n\n"
+            section += f"Mid prices: {data.mid_prices_list}\n"
+            section += f"EMA indicators (20‑period): {ind_3m.get('ema_20_list', [])}\n"
+            section += f"MACD indicators: {ind_3m.get('macd_list', [])}\n"
+            section += f"RSI indicators (7‑Period): {ind_3m.get('rsi_7_list', [])}\n"
+            section += f"RSI indicators (14‑Period): {ind_3m.get('rsi_14_list', [])}\n\n"
+            
+            # Longer-term context (4h)
+            section += "Longer‑term context (4‑hour timeframe):\n\n"
+            section += f"20‑Period EMA: {ind_4h.get('ema_20', 0)} vs. 50‑Period EMA: {ind_4h.get('ema_50', 0)}\n"
+            section += f"3‑Period ATR: {ind_4h.get('atr_3', 0)} vs. 14‑Period ATR: {ind_4h.get('atr_14', 0)}\n"
+            section += f"Current Volume: {data.volume_current_4h} vs. Average Volume: {data.volume_average_4h}\n"
+            section += f"MACD indicators: {ind_4h.get('macd_list', [])}\n"
+            section += f"RSI indicators (14‑Period): {ind_4h.get('rsi_14_list', [])}\n"
 
         return section
 
-    def _build_constraints_section(self, agent: TradingAgent) -> str:
-        """Build the constraints section with risk management rules.
+    def _build_account_section(self, account: AccountInfo, positions: List[Position], agent: TradingAgent) -> str:
+        """Build the account information section."""
+        # Calculate return pct (simplified)
+        # Assuming starting balance was 10000 or we track it elsewhere. 
+        # For now, we just show what we have.
+        
+        section = "HERE IS YOUR ACCOUNT INFORMATION & PERFORMANCE\n\n"
+        section += f"Current Total Return (percent): N/A%\n" # We need to track starting balance to calc this
+        section += f"Available Cash: {account.withdrawable}\n"
+        section += f"Current Account Value: {account.account_value}\n"
+        section += f"Max Allowed Leverage: {agent.max_leverage}x\n\n"
+        
+        section += "Current live positions & performance: "
+        
+        pos_strings = []
+        for pos in positions:
+            # Format as dictionary-like string as per example
+            pos_dict = {
+                'symbol': pos.coin,
+                'quantity': pos.size,
+                'entry_price': pos.entry_price,
+                'current_price': pos.mark_price,
+                'liquidation_price': pos.liquidation_price,
+                'unrealized_pnl': pos.unrealized_pnl,
+                'leverage': pos.leverage,
+                # We don't have exit plan stored in Position object yet, so we omit or mock
+                'exit_plan': {}, 
+                'confidence': 0.0, # We don't store confidence in Position
+                'risk_usd': 0.0,
+                'notional_usd': pos.position_value
+            }
+            pos_strings.append(str(pos_dict))
+            
+        section += " ".join(pos_strings) + "\n\n"
+        section += "Sharpe Ratio: N/A" # We don't calculate Sharpe yet
+        
+        return section
 
-        Args:
-            agent: Trading agent configuration
+    def _build_system_instruction(self) -> str:
+        """Build the system instruction for output format."""
+        return """
+IMPORTANT: You must respond with THREE components:
 
-        Returns:
-            Constraints section string
-        """
-        return f"""## Risk Management Constraints
+1. Natural Language Analysis (User-Facing)
+2. CHAIN_OF_THOUGHT (JSON) - MUST INCLUDE AN ENTRY FOR EVERY COIN PROVIDED IN THE DATA ABOVE.
+3. TRADING_DECISIONS (Structured Format) - MUST INCLUDE A DECISION FOR EVERY COIN.
 
-You MUST follow these risk management rules:
+Example Output Format:
 
-1. **Position Sizing:**
-   - Maximum position size per trade: {agent.max_position_size}% of account value
-   - Maximum leverage: {agent.max_leverage}x
-   - Maximum total exposure: Do not exceed 100% of account value across all positions
+My portfolio is up... [Analysis] ...
 
-2. **Stop Loss:**
-   - REQUIRED: Every position must have a stop loss
-   - Maximum loss per trade: {agent.stop_loss_pct}% of position value
-   - Stop loss must be realistic and account for market volatility (use ATR)
-
-3. **Take Profit:**
-   - Target profit per trade: {agent.take_profit_pct}% of position value
-   - Consider scaling out at multiple levels
-
-4. **Trading Strategy:**
-   - Strategy: {agent.strategy_description or "Follow technical indicators and market trends"}
-   - Focus on high-probability setups
-   - Avoid overtrading
-
-5. **Market Conditions:**
-   - Do not trade during high volatility unless specifically designed for it
-   - Consider overall market sentiment
-   - Respect trend direction (don't fight the trend)"""
-
-    def _build_task_section(self) -> str:
-        """Build the task section with JSON output requirements.
-
-        Returns:
-            Task section string
-        """
-        return """## Your Task
-
-Analyze the market data, technical indicators, and your current portfolio. Then make ONE trading decision.
-
-**You must respond with ONLY a JSON object in this exact format:**
-
-```json
+CHAIN_OF_THOUGHT
 {
-  "reasoning": "Detailed explanation of your analysis and decision (2-3 sentences)",
-  "action": "OPEN_LONG" | "OPEN_SHORT" | "CLOSE_POSITION" | "HOLD",
-  "coin": "BTC" | "ETH" | "SOL" | "BNB" | "DOGE" | "XRP",
-  "size_usd": 0.0,
-  "leverage": 1,
-  "stop_loss_price": 0.0,
-  "take_profit_price": 0.0,
-  "confidence": 0.0
+  "BTC": {
+    "signal": "long/short/hold/close",
+    "confidence": 0.85,
+    "justification": "Detailed reasoning for the decision...",
+    "risk_usd": 100.0,
+    "leverage": 3,
+    "stop_loss": 45000.0,
+    "profit_target": 55000.0
+  },
+  "ETH": { ... },
+  ... (one for each coin)
 }
-```
 
-**Field Definitions:**
+TRADING_DECISIONS
+BTC
+HOLD
+65%
 
-- `reasoning`: Your analysis explaining WHY you made this decision (required, 2-3 sentences)
-- `action`: The action to take (required)
-  - "OPEN_LONG": Open a new long position
-  - "OPEN_SHORT": Open a new short position
-  - "CLOSE_POSITION": Close an existing position for the specified coin
-  - "HOLD": Do nothing (no good trading opportunity right now)
-- `coin`: The cryptocurrency to trade (required)
-- `size_usd`: Position size in USD (required for OPEN_LONG/OPEN_SHORT, 0 for CLOSE/HOLD)
-- `leverage`: Leverage to use, 1-50x (required for OPEN_LONG/OPEN_SHORT, 1 for CLOSE/HOLD)
-- `stop_loss_price`: Stop loss price in USD (required for OPEN_LONG/OPEN_SHORT, 0 for CLOSE/HOLD)
-- `take_profit_price`: Take profit price in USD (required for OPEN_LONG/OPEN_SHORT, 0 for CLOSE/HOLD)
-- `confidence`: Your confidence in this decision, 0.0-1.0 (required)
+QUANTITY: 0
 
-**Important Notes:**
+ETH
+OPEN_LONG
+70%
 
-1. You MUST output valid JSON only - no other text before or after
-2. You can only make ONE decision per cycle
-3. Do NOT open a new position if you already have a position in that coin
-4. Stop loss and take profit prices must be realistic and follow risk management rules
-5. If there's no good trading opportunity, use "HOLD" action
-6. Consider transaction costs and slippage in your decision
+QUANTITY: 1.26
 
-**Example Valid Responses:**
-
-Opening a long position:
-```json
-{
-  "reasoning": "BTC shows strong bullish momentum with RSI at 45 and price breaking above EMA on 4h chart. MACD golden cross confirms uptrend. Low ATR suggests stable entry.",
-  "action": "OPEN_LONG",
-  "coin": "BTC",
-  "size_usd": 1000.0,
-  "leverage": 3,
-  "stop_loss_price": 49000.0,
-  "take_profit_price": 52000.0,
-  "confidence": 0.75
-}
-```
-
-Holding (no action):
-```json
-{
-  "reasoning": "Market conditions are unclear with mixed signals across timeframes. RSI near neutral and no clear trend direction. Better to wait for confirmation.",
-  "action": "HOLD",
-  "coin": "BTC",
-  "size_usd": 0.0,
-  "leverage": 1,
-  "stop_loss_price": 0.0,
-  "take_profit_price": 0.0,
-  "confidence": 0.50
-}
-```
-
-Closing a position:
-```json
-{
-  "reasoning": "ETH position has reached take profit target of +8%. RSI showing overbought conditions on 3m chart. Good time to take profits.",
-  "action": "CLOSE_POSITION",
-  "coin": "ETH",
-  "size_usd": 0.0,
-  "leverage": 1,
-  "stop_loss_price": 0.0,
-  "take_profit_price": 0.0,
-  "confidence": 0.85
-}
-```
-
-Now, analyze the data and provide your decision as a JSON object."""
+... (one for each coin)
+"""

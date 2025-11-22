@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..models.database import TradingAgent
 from ..trading.position_manager import PositionManager
+from ..trading.hyperliquid_executor import HyperLiquidExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -61,36 +62,17 @@ class RiskManager:
         agent_id: UUID,
         coin: str,
         size_usd: Decimal,
-        leverage: int
+        leverage: int,
+        executor: Optional[HyperLiquidExecutor] = None
     ) -> Tuple[bool, Optional[str]]:
         """Validate trade against risk rules.
-
-        This method performs comprehensive risk checks:
-        1. Maximum leverage validation
-        2. Position size limits (% of account)
-        3. Margin sufficiency check
-        4. Total exposure limits
 
         Args:
             agent_id: Trading agent ID
             coin: Trading pair symbol
             size_usd: Position size in USD
             leverage: Leverage to use
-
-        Returns:
-            Tuple of (is_valid, rejection_reason)
-            - is_valid: True if trade passes all risk checks
-            - rejection_reason: Description of why trade was rejected, or None
-
-        Example:
-            >>> valid, reason = risk_manager.validate_trade(
-            ...     agent_id=uuid4(),
-            ...     coin="BTC",
-            ...     size_usd=Decimal("5000"),
-            ...     leverage=10
-            ... )
-            >>> if not valid:
-            ...     print(f"Trade rejected: {reason}")
+            executor: Specific executor to use
         """
         # Get agent configuration
         agent = self.db.query(TradingAgent).filter_by(id=agent_id).first()
@@ -101,7 +83,7 @@ class RiskManager:
 
         # Get account info
         try:
-            account = self.position_manager.get_account_value(agent_id)
+            account = self.position_manager.get_account_value(agent_id, executor=executor)
         except Exception as e:
             logger.error(f"Failed to get account value: {e}")
             return False, f"Failed to get account info: {str(e)}"
@@ -141,24 +123,24 @@ class RiskManager:
             )
 
         # Rule 4: Check max total exposure (80% of account value)
-        # Calculate current total exposure
-        current_exposure = self.position_manager.get_total_exposure(agent_id)
-        new_total_exposure = current_exposure + float(size_usd)
-        max_total_exposure = account.account_value * 0.8  # 80% max
+        # REMOVED per user request to allow LLM more freedom
+        # current_exposure = self.position_manager.get_total_exposure(agent_id)
+        # new_total_exposure = current_exposure + float(size_usd)
+        # max_total_exposure = account.account_value * 0.8  # 80% max
 
-        if new_total_exposure > max_total_exposure:
-            logger.warning(
-                f"Total exposure ${new_total_exposure:.2f} exceeds "
-                f"max ${max_total_exposure:.2f}"
-            )
-            return False, (
-                f"Total exposure ${new_total_exposure:.2f} exceeds "
-                f"max ${max_total_exposure:.2f}"
-            )
+        # if new_total_exposure > max_total_exposure:
+        #     logger.warning(
+        #         f"Total exposure ${new_total_exposure:.2f} exceeds "
+        #         f"max ${max_total_exposure:.2f}"
+        #     )
+        #     return False, (
+        #         f"Total exposure ${new_total_exposure:.2f} exceeds "
+        #         f"max ${max_total_exposure:.2f}"
+        #     )
 
         logger.info(
             f"Trade validation passed: {coin} ${size_usd} @ {leverage}x "
-            f"(margin: ${required_margin:.2f}, exposure: ${new_total_exposure:.2f})"
+            f"(margin: ${required_margin:.2f})"
         )
         return True, None
 
@@ -249,32 +231,18 @@ class RiskManager:
     def check_liquidation_risk(
         self,
         agent_id: UUID,
-        threshold_pct: Decimal = Decimal("20")
+        threshold_pct: Decimal = Decimal("20"),
+        executor: Optional[HyperLiquidExecutor] = None
     ) -> Tuple[bool, List[str]]:
         """Check if any positions are close to liquidation.
-
-        This method monitors all open positions and warns if any are
-        within the threshold distance from their liquidation price.
 
         Args:
             agent_id: Trading agent ID
             threshold_pct: Warning threshold (% distance from liquidation)
-
-        Returns:
-            Tuple of (at_risk, warnings)
-            - at_risk: True if any position is within threshold of liquidation
-            - warnings: List of warning messages for at-risk positions
-
-        Example:
-            >>> at_risk, warnings = risk_manager.check_liquidation_risk(
-            ...     agent_id, threshold_pct=Decimal("20")
-            ... )
-            >>> if at_risk:
-            ...     for warning in warnings:
-            ...         print(warning)
+            executor: Specific executor to use
         """
         try:
-            positions = self.position_manager.get_current_positions(agent_id)
+            positions = self.position_manager.get_current_positions(agent_id, executor=executor)
         except Exception as e:
             logger.error(f"Failed to get positions for liquidation check: {e}")
             return False, []
@@ -316,23 +284,15 @@ class RiskManager:
     def get_max_position_size(
         self,
         agent_id: UUID,
-        leverage: int = 1
+        leverage: int = 1,
+        executor: Optional[HyperLiquidExecutor] = None
     ) -> Decimal:
         """Calculate maximum allowed position size.
-
-        This considers the agent's max_position_size parameter and
-        current account value.
 
         Args:
             agent_id: Trading agent ID
             leverage: Leverage to be used
-
-        Returns:
-            Maximum position size in USD
-
-        Example:
-            >>> max_size = risk_manager.get_max_position_size(agent_id, leverage=10)
-            >>> print(f"Max position: ${max_size}")
+            executor: Specific executor to use
         """
         agent = self.db.query(TradingAgent).filter_by(id=agent_id).first()
         if not agent:
@@ -340,7 +300,7 @@ class RiskManager:
             return Decimal("0")
 
         try:
-            account = self.position_manager.get_account_value(agent_id)
+            account = self.position_manager.get_account_value(agent_id, executor=executor)
             max_size = Decimal(str(account.account_value)) * agent.max_position_size / 100
             logger.debug(
                 f"Max position size for agent {agent_id}: ${max_size} "

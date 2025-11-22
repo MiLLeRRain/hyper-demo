@@ -81,7 +81,7 @@ class TradingCycleExecutor:
 
             decisions = self.multi_agent_orchestrator.generate_all_decisions(
                 market_data=market_data,
-                position_manager=self.trading_orchestrator.position_manager
+                trading_orchestrator=self.trading_orchestrator
             )
 
             ai_duration = time.time() - ai_start
@@ -180,6 +180,15 @@ class TradingCycleExecutor:
                     agent_id=agent_id,
                     decision_id=decision_id
                 )
+
+                # Update decision record in DB with execution result
+                if hasattr(decision, 'error_message'):
+                    if not success and error:
+                        current_error = decision.error_message or ""
+                        new_error = f"Execution rejected: {error}"
+                        decision.error_message = f"{current_error} | {new_error}" if current_error else new_error
+                        self.db.add(decision)
+                        self.db.commit()
 
                 result = {
                     "agent_id": str(agent_id),

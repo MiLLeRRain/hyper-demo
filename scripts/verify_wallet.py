@@ -13,10 +13,10 @@ from eth_account import Account
 # Load environment
 load_dotenv()
 
-private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY")
+private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY_DEFAULT")
 
 if not private_key:
-    print("❌ HYPERLIQUID_PRIVATE_KEY not found in .env")
+    print("❌ HYPERLIQUID_PRIVATE_KEY_DEFAULT not found in .env")
     sys.exit(1)
 
 # Ensure 0x prefix

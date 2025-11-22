@@ -170,6 +170,10 @@ class AgentDecision(Base):
         Text, nullable=False,
         comment="LLM's reasoning for the decision"
     )
+    chain_of_thought: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        comment="Structured Chain of Thought JSON"
+    )
 
     # LLM interaction data
     llm_response: Mapped[Optional[str]] = mapped_column(
