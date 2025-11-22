@@ -81,7 +81,8 @@ class TestTradingOrchestrator:
     ):
         """Create TradingOrchestrator instance."""
         return TradingOrchestrator(
-            executor=mock_executor,
+            executors={"default": mock_executor},
+            default_executor=mock_executor,
             order_manager=mock_order_manager,
             position_manager=mock_position_manager,
             risk_manager=mock_risk_manager,

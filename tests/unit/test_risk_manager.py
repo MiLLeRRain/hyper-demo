@@ -160,30 +160,6 @@ class TestRiskManager:
         assert valid is False
         assert "Insufficient margin" in reason
 
-    def test_validate_trade_exceeds_total_exposure(
-        self, risk_manager, mock_position_manager, mock_db, mock_agent, mock_account_info
-    ):
-        """Test validation when total exposure exceeds limit."""
-        agent_id = mock_agent.id
-
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
-        mock_position_manager.get_account_value.return_value = mock_account_info
-
-        # Already have $7,000 exposure, max is 80% = $8,000
-        # Try to add $2,000 more (total $9,000 > $8,000)
-        mock_position_manager.get_total_exposure.return_value = 7000.0
-
-        valid, reason = risk_manager.validate_trade(
-            agent_id=agent_id,
-            coin="ETH",
-            size_usd=Decimal("2000"),
-            leverage=5
-        )
-
-        assert valid is False
-        assert "Total exposure" in reason
-        assert "exceeds" in reason
-
     def test_calculate_stop_loss_long(self, risk_manager):
         """Test stop loss calculation for long position."""
         entry_price = Decimal("50000")

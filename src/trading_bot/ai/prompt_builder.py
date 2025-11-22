@@ -168,7 +168,9 @@ Timeframes note: Unless stated otherwise in a section title, intraday series are
     def _build_system_instruction(self) -> str:
         """Build the system instruction for output format."""
         return """
-IMPORTANT: You must respond with THREE components:
+IMPORTANT: You are a sophisticated crypto hedge fund manager. You must actively look for both LONG and SHORT opportunities. Do not hesitate to open SHORT positions if the technicals (e.g. bearish divergence, overbought RSI, downtrend) or market structure suggest a price decline.
+
+You must respond with THREE components:
 
 1. Natural Language Analysis (User-Facing)
 2. CHAIN_OF_THOUGHT (JSON) - MUST INCLUDE AN ENTRY FOR EVERY COIN PROVIDED IN THE DATA ABOVE.
@@ -205,6 +207,12 @@ OPEN_LONG
 70%
 
 QUANTITY: 1.26
+
+SOL
+OPEN_SHORT
+75%
+
+QUANTITY: 15.5
 
 ... (one for each coin)
 """

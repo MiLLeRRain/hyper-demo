@@ -252,9 +252,10 @@ class TestPositionManager:
         assert account.account_value == 10800.0
 
         # Position value calculated in get_account_value method
-        # Withdrawable = account_value - position_value
+        # Withdrawable = account_value - margin_used
         # Position value = BTC (0.1 * 50000) + ETH (1.0 * 3000) = 8000
-        assert account.withdrawable == 2800.0  # 10800 - 8000
+        # Margin used = 8000 / 10 (leverage) = 800
+        assert account.withdrawable == 10000.0  # 10800 - 800
 
     def test_get_account_value_agent_not_found(self, position_manager, mock_db):
         """Test account value when agent doesn't exist."""

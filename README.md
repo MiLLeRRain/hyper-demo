@@ -165,6 +165,12 @@ python scripts/run_integration_tests.py --fast
 - CLI 工具
 - 监控和告警
 
+### 6️⃣ 数据挖掘与反向训练 (New!) 🧠
+- **决策分析工具**: `scripts/analyze_decisions.py`
+- **数据清洗**: 自动关联决策与交易结果 (PnL/ROI)
+- **数据集生成**: 导出 JSONL 格式，用于 LLM Fine-tuning
+- **自我进化**: 支持基于历史盈亏数据的反向训练和错误分析
+
 ---
 
 ## 🔑 关键特性
