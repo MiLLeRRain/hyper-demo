@@ -86,3 +86,6 @@ backups/
 
 # But keep Docker init script
 !docker/init-db.sql
+
+# Decision analysis data
+data/decision_analysis.jsonl
