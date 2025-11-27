@@ -5,7 +5,7 @@ from .commands import start, stop, status, agent, logs
 
 
 @click.group()
-@click.version_option(version='1.0.0', prog_name='tradingbot')
+@click.version_option(version='0.2.0', prog_name='tradingbot')
 def cli():
     """
     HyperLiquid AI Trading Bot CLI.
