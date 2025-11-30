@@ -12,6 +12,8 @@ from src.trading_bot.models.market_data import AccountInfo, Position
 from src.trading_bot.ai.agent_manager import AgentManager
 from src.trading_bot.ai.prompt_builder import PromptBuilder
 from src.trading_bot.ai.decision_parser import DecisionParser, TradingDecision
+from src.trading_bot.ai.security import PromptAuditor
+from src.trading_bot.config.models import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,17 @@ class MultiAgentOrchestrator:
         self.prompt_builder = PromptBuilder()
         self.decision_parser = DecisionParser()
         
+        # Initialize Security Layer
+        # We need to load config here or pass it in. For now, loading it is safer.
+        try:
+            config = load_config()
+            security_config = config.security.prompt_audit if config.security else {}
+            self.prompt_auditor = PromptAuditor(security_config)
+            logger.info(f"Security layer initialized (enabled={self.prompt_auditor.enabled})")
+        except Exception as e:
+            logger.warning(f"Failed to load security config, using defaults: {e}")
+            self.prompt_auditor = PromptAuditor({})
+
         self.start_time = datetime.utcnow()
         self.invocation_count = 0
 
@@ -203,6 +216,9 @@ class MultiAgentOrchestrator:
                 start_time=self.start_time,
                 invocation_count=self.invocation_count
             )
+
+            # Audit and sanitize prompt (Security Layer)
+            prompt = self.prompt_auditor.audit(prompt)
 
             # Get LLM provider
             provider = self.agent_manager.get_llm_provider(agent)

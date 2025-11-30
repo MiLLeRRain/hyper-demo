@@ -173,6 +173,12 @@ python scripts/run_integration_tests.py --fast
 - **Dataset Generation**: Export JSONL for LLM Fine-tuning
 - **Evolution System**: "Sidecar" architecture for autonomous prompt optimization
 
+### 7️⃣ Security & Audit (New!) 🛡️
+- **Prompt Audit Layer**: Pre-flight check for all AI prompts
+- **PII Masking**: Auto-redact wallet addresses and private keys
+- **Injection Detection**: Block malicious prompt injection attempts
+- **Configurable Rules**: Customizable security policies via `config.yaml`
+
 ---
 
 ## 📊 Development Roadmap
@@ -187,6 +193,7 @@ python scripts/run_integration_tests.py --fast
     - [ ] **Bridge**: Shared Database / Template Contract
     - [ ] **Optimizer**: Groq/Llama-3.1 based prompt mutation loop
     - [ ] **Goal**: Autonomous self-improvement of trading strategies
+    - [x] **Security**: Prompt Audit & PII Protection Layer ✅
 
 ---
 

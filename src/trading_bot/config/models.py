@@ -108,6 +108,15 @@ class LoggingConfig(BaseModel):
     colorize_console: bool
 
 
+class SecurityConfig(BaseModel):
+    prompt_audit: Dict[str, Any] = Field(default_factory=lambda: {
+        "enabled": True,
+        "mask_pii": True,
+        "block_injection": True,
+        "pii_patterns": []
+    })
+
+
 class DryRunConfig(BaseModel):
     enabled: bool
     data_source: str
@@ -128,6 +137,7 @@ class Config(BaseModel):
     database: DatabaseConfig
     monitoring: MonitoringConfig
     logging: LoggingConfig
+    security: Optional[SecurityConfig] = None
     environments: Optional[Dict[str, Any]] = None
 
     @field_validator('agents')

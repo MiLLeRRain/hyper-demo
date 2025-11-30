@@ -173,6 +173,12 @@ python scripts/run_integration_tests.py --fast
 - **数据集生成**: 导出 JSONL 格式，用于 LLM Fine-tuning
 - **自我进化**: 支持基于历史盈亏数据的反向训练和错误分析
 
+### 7️⃣ 安全与审计 (New!) 🛡️
+- **Prompt 审计层**: AI Prompt 发送前的最后一道防线
+- **隐私屏蔽 (PII Masking)**: 自动打码钱包地址和私钥
+- **注入检测**: 拦截恶意的 Prompt Injection 攻击
+- **灵活配置**: 通过 `config.yaml` 自定义安全规则
+
 ---
 
 ## 🔑 关键特性
@@ -280,6 +286,7 @@ testnet:
     - [ ] **桥接**: 共享数据库 / 模板合约
     - [ ] **优化器**: 基于 Groq/Llama-3.1 的 Prompt 变异循环
     - [ ] **目标**: 交易策略的自主自我进化
+    - [x] **安全**: Prompt 审计与隐私保护层 ✅
 
 ---
 

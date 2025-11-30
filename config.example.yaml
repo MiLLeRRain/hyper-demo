@@ -305,6 +305,18 @@ monitoring:
       to_emails: ['${EMAIL_TO}']
 
 # ============================================================================
+# SECURITY CONFIGURATION
+# ============================================================================
+security:
+  prompt_audit:
+    enabled: true
+    mask_pii: true
+    block_injection: true
+    pii_patterns:
+      - "0x[a-fA-F0-9]{40}"  # ETH address
+      - "[1-9A-HJ-NP-Za-km-z]{32,44}" # SOL address
+
+# ============================================================================
 # LOGGING CONFIGURATION
 # ============================================================================
 logging:
