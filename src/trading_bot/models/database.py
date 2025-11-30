@@ -335,3 +335,43 @@ class BotState(Base):
 
     def __repr__(self) -> str:
         return f"<BotState(key='{self.key}', updated_at={self.updated_at})>"
+
+
+class SecurityEvent(Base):
+    """Security event model - stores prompt audit logs."""
+
+    __tablename__ = "security_events"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    event_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True,
+        comment="injection_attempt, pii_leakage, etc."
+    )
+    severity: Mapped[str] = mapped_column(
+        String(20), nullable=False,
+        comment="low, medium, high, critical"
+    )
+    description: Mapped[str] = mapped_column(
+        Text, nullable=False,
+        comment="Description of the event"
+    )
+    original_content: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment="Original content that triggered the event (if safe to store)"
+    )
+    agent_id: Mapped[Optional[UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("trading_agents.id"),
+        comment="Agent ID associated with the event (if any)"
+    )
+    metadata_json: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        comment="Additional metadata"
+    )
+
+    def __repr__(self) -> str:
+        return f"<SecurityEvent(type='{self.event_type}', severity='{self.severity}', timestamp={self.timestamp})>"

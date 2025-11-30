@@ -3,6 +3,8 @@
 import logging
 import re
 from typing import List, Dict, Any, Optional
+from sqlalchemy.orm import Session
+from src.trading_bot.models.database import SecurityEvent
 
 logger = logging.getLogger(__name__)
 
@@ -16,16 +18,18 @@ class PromptAuditor:
     2. Potential prompt injection attempts are detected (basic heuristic).
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], db_session: Optional[Session] = None):
         """Initialize the Prompt Auditor.
 
         Args:
             config: Security configuration dictionary
+            db_session: Database session for logging events (optional)
         """
         self.enabled = config.get("enabled", True)
         self.mask_pii = config.get("mask_pii", True)
         self.block_injection = config.get("block_injection", True)
         self.pii_patterns = config.get("pii_patterns", [])
+        self.db = db_session
         
         # Compile regex patterns
         self._pii_regexes = []
@@ -45,11 +49,12 @@ class PromptAuditor:
             # Add more as needed
         ]
 
-    def audit(self, prompt: str) -> str:
+    def audit(self, prompt: str, agent_id: Optional[str] = None) -> str:
         """Audit and sanitize the prompt.
 
         Args:
             prompt: The raw prompt string
+            agent_id: ID of the agent generating the prompt (optional)
 
         Returns:
             Sanitized prompt string
@@ -62,13 +67,29 @@ class PromptAuditor:
         # 1. Check for Injection (Logging only for now, or raise exception)
         if self.block_injection:
             if self._detect_injection(audited_prompt):
-                logger.warning("Potential prompt injection detected! Proceeding with caution.")
+                msg = "Potential prompt injection detected! Proceeding with caution."
+                logger.warning(msg)
+                self._log_event(
+                    event_type="injection_attempt",
+                    severity="high",
+                    description=msg,
+                    original_content=prompt[:1000], # Store snippet
+                    agent_id=agent_id
+                )
                 # We could raise an exception here to block the request entirely
                 # raise ValueError("Prompt injection detected")
 
         # 2. Mask PII
         if self.mask_pii:
-            audited_prompt = self._mask_pii(audited_prompt)
+            audited_prompt, masked_count = self._mask_pii(audited_prompt)
+            if masked_count > 0:
+                self._log_event(
+                    event_type="pii_leakage",
+                    severity="medium",
+                    description=f"Masked {masked_count} PII instances",
+                    original_content=None, # Don't store PII
+                    agent_id=agent_id
+                )
 
         return audited_prompt
 
@@ -80,9 +101,44 @@ class PromptAuditor:
                 return True
         return False
 
-    def _mask_pii(self, prompt: str) -> str:
-        """Mask PII in the prompt."""
+    def _mask_pii(self, prompt: str) -> tuple[str, int]:
+        """Mask PII in the prompt.
+        
+        Returns:
+            Tuple of (masked_prompt, count_of_replacements)
+        """
         masked_prompt = prompt
+        count = 0
         for regex in self._pii_regexes:
+            # Count matches first
+            matches = regex.findall(masked_prompt)
+            count += len(matches)
+            # Replace
             masked_prompt = regex.sub("[REDACTED_PII]", masked_prompt)
-        return masked_prompt
+        return masked_prompt, count
+
+    def _log_event(
+        self, 
+        event_type: str, 
+        severity: str, 
+        description: str, 
+        original_content: Optional[str] = None,
+        agent_id: Optional[str] = None
+    ):
+        """Log security event to database."""
+        if not self.db:
+            return
+
+        try:
+            event = SecurityEvent(
+                event_type=event_type,
+                severity=severity,
+                description=description,
+                original_content=original_content,
+                agent_id=agent_id
+            )
+            self.db.add(event)
+            self.db.commit()
+        except Exception as e:
+            logger.error(f"Failed to log security event: {e}")
+

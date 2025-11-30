@@ -53,7 +53,8 @@ class MultiAgentOrchestrator:
         try:
             config = load_config()
             security_config = config.security.prompt_audit if config.security else {}
-            self.prompt_auditor = PromptAuditor(security_config)
+            # Pass db_session to PromptAuditor
+            self.prompt_auditor = PromptAuditor(security_config, db_session=self.db)
             logger.info(f"Security layer initialized (enabled={self.prompt_auditor.enabled})")
         except Exception as e:
             logger.warning(f"Failed to load security config, using defaults: {e}")
@@ -218,7 +219,7 @@ class MultiAgentOrchestrator:
             )
 
             # Audit and sanitize prompt (Security Layer)
-            prompt = self.prompt_auditor.audit(prompt)
+            prompt = self.prompt_auditor.audit(prompt, agent_id=str(agent.id))
 
             # Get LLM provider
             provider = self.agent_manager.get_llm_provider(agent)
