@@ -32,6 +32,7 @@ class PromptBuilder:
         positions: List[Position],
         account: AccountInfo,
         agent: TradingAgent,
+        recent_decisions: List[Any] = [],
         start_time: Optional[datetime] = None,
         invocation_count: int = 0
     ) -> str:
@@ -42,6 +43,7 @@ class PromptBuilder:
             positions: List of current positions
             account: Account information
             agent: Trading agent configuration
+            recent_decisions: List of recent trading decisions (memory)
             start_time: Time when the bot started trading
             invocation_count: Number of times the agent has been invoked
 
@@ -58,6 +60,7 @@ class PromptBuilder:
             self._build_header(minutes_elapsed, invocation_count),
             self._build_market_data_section(market_data),
             self._build_account_section(account, positions, agent),
+            self._build_recent_history_section(recent_decisions),
             self._build_system_instruction()
         ]
 
@@ -66,7 +69,8 @@ class PromptBuilder:
         logger.info(
             f"Built prompt for agent '{agent.name}' | "
             f"Length: {len(prompt)} chars | "
-            f"Positions: {len(positions)}"
+            f"Positions: {len(positions)} | "
+            f"History: {len(recent_decisions)}"
         )
 
         return prompt
@@ -165,15 +169,44 @@ Timeframes note: Unless stated otherwise in a section title, intraday series are
         
         return section
 
+    def _build_recent_history_section(self, recent_decisions: List[Any]) -> str:
+        """Build the recent trading history section."""
+        if not recent_decisions:
+            return "RECENT TRADING HISTORY: None (First run or no history available)\n"
+            
+        section = "RECENT TRADING HISTORY (Most recent first):\n"
+        section += "Review your past decisions to ensure consistency and avoid 'flip-flopping' (over-trading).\n\n"
+        
+        for i, decision in enumerate(recent_decisions[:5]):  # Show last 5 decisions
+            timestamp = decision.timestamp.strftime("%H:%M") if hasattr(decision, 'timestamp') else "N/A"
+            action = decision.action
+            coin = decision.coin
+            reason = decision.reasoning[:100] + "..." if len(decision.reasoning) > 100 else decision.reasoning
+            
+            section += f"{i+1}. [{timestamp}] {action} {coin} - Reason: {reason}\n"
+            
+        return section
+
     def _build_system_instruction(self) -> str:
         """Build the system instruction for output format."""
         return """
 IMPORTANT: You are a sophisticated crypto hedge fund manager. You must actively look for both LONG and SHORT opportunities. Do not hesitate to open SHORT positions if the technicals (e.g. bearish divergence, overbought RSI, downtrend) or market structure suggest a price decline.
 
-TRADING STYLE GUIDELINES:
-1. Focus on the 4-Hour Trend: Do not be shaken out by minor fluctuations in the 3-minute data. Use the 3-minute data for entry timing, but use the 4-hour data for trend direction.
-2. Avoid Over-Trading: Only CLOSE a position if the market structure has clearly invalidated your thesis or the 4H trend has reversed. Do not close just to "lock in pennies" or because of short-term noise.
-3. Let Profits Run: Be patient with winning positions.
+TRADING STYLE GUIDELINES (CRITICAL):
+1. **AVOID OVER-TRADING**: You are trading on a 3-minute loop, but you must NOT flip your position every 3 minutes. 
+   - If you just opened a position, GIVE IT TIME to play out (at least 15-30 minutes) unless a catastrophic reversal occurs.
+   - Do not close a position for a tiny loss just because of one red candle.
+   - Do not close a position for a tiny profit (pennies) unless the trend is exhausted.
+
+2. **Focus on the 4-Hour Trend**: 
+   - Use the 4-Hour data to determine the MAJOR TREND direction.
+   - Use the 3-Minute data ONLY for precise entry/exit timing.
+   - Do not trade against the 4H trend unless you see a clear reversal pattern on high volume.
+
+3. **High Conviction Only**:
+   - If the signal is weak or mixed, choose "HOLD".
+   - Only "OPEN_LONG" or "OPEN_SHORT" if your confidence is > 0.7.
+   - If you are currently holding a position, the bar to CLOSE it should be high (e.g. trend invalidation).
 
 You must respond with THREE components:
 

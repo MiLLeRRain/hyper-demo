@@ -190,12 +190,16 @@ class MultiAgentOrchestrator:
         logger.info(f"[{agent.name}] Starting decision...")
 
         try:
+            # Fetch recent decisions for context (Memory)
+            recent_decisions = self.get_recent_decisions(agent_id=agent.id, limit=5)
+
             # Build prompt
             prompt = self.prompt_builder.build(
                 market_data=market_data,
                 positions=positions,
                 account=account,
                 agent=agent,
+                recent_decisions=recent_decisions,
                 start_time=self.start_time,
                 invocation_count=self.invocation_count
             )
