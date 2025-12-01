@@ -85,6 +85,10 @@ class TestHyperLiquidSigner:
         r_hex = r[2:] if r.startswith("0x") else r
         s_hex = s[2:] if s.startswith("0x") else s
 
+        # Pad with leading zeros if necessary (r and s are 32-byte integers)
+        r_hex = r_hex.zfill(64)
+        s_hex = s_hex.zfill(64)
+
         assert len(r_hex) == 64  # 64 hex chars (32 bytes)
         assert len(s_hex) == 64
 
