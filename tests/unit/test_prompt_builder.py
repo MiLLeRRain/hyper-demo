@@ -1,9 +1,10 @@
 """Unit tests for PromptBuilder."""
 
 import pytest
+import pandas as pd
 from datetime import datetime
 from src.trading_bot.ai.prompt_builder import PromptBuilder
-from src.trading_bot.models.market_data import AccountInfo, Position
+from src.trading_bot.models.market_data import AccountInfo, Position, MarketData, Price
 
 
 class TestPromptBuilder:
@@ -68,110 +69,44 @@ class TestPromptBuilder:
     @pytest.fixture
     def mock_market_data(self):
         """Create mock market data."""
-        return {
-            "BTC": {
-                "price": 51000.0,
-                "3m": {
-                    "ema": 50500.0,
-                    "macd": 150.5,
-                    "macd_signal": 120.0,
-                    "rsi": 65.5,
-                    "atr": 500.0
-                },
-                "4h": {
-                    "ema": 50000.0,
-                    "macd": 200.0,
-                    "macd_signal": 180.0,
-                    "rsi": 60.0,
-                    "atr": 800.0
-                }
-            },
-            "ETH": {
-                "price": 2950.0,
-                "3m": {
-                    "ema": 2980.0,
-                    "macd": -20.5,
-                    "macd_signal": -15.0,
-                    "rsi": 45.0,
-                    "atr": 50.0
-                },
-                "4h": {
-                    "ema": 3000.0,
-                    "macd": -50.0,
-                    "macd_signal": -40.0,
-                    "rsi": 42.0,
-                    "atr": 80.0
-                }
-            },
-            "SOL": {
-                "price": 150.0,
-                "3m": {
-                    "ema": 149.0,
-                    "macd": 2.5,
-                    "macd_signal": 2.0,
-                    "rsi": 55.0,
-                    "atr": 5.0
-                },
-                "4h": {
-                    "ema": 148.0,
-                    "macd": 5.0,
-                    "macd_signal": 4.0,
-                    "rsi": 58.0,
-                    "atr": 8.0
-                }
-            },
-            "BNB": {
-                "price": 300.0,
-                "3m": {
-                    "ema": 298.0,
-                    "macd": 1.5,
-                    "macd_signal": 1.0,
-                    "rsi": 52.0,
-                    "atr": 3.0
-                },
-                "4h": {
-                    "ema": 297.0,
-                    "macd": 3.0,
-                    "macd_signal": 2.5,
-                    "rsi": 54.0,
-                    "atr": 5.0
-                }
-            },
-            "DOGE": {
-                "price": 0.08,
-                "3m": {
-                    "ema": 0.079,
-                    "macd": 0.001,
-                    "macd_signal": 0.0008,
-                    "rsi": 50.0,
-                    "atr": 0.002
-                },
-                "4h": {
-                    "ema": 0.078,
-                    "macd": 0.002,
-                    "macd_signal": 0.0015,
-                    "rsi": 51.0,
-                    "atr": 0.003
-                }
-            },
-            "XRP": {
-                "price": 0.55,
-                "3m": {
-                    "ema": 0.54,
-                    "macd": 0.01,
-                    "macd_signal": 0.008,
-                    "rsi": 58.0,
-                    "atr": 0.01
-                },
-                "4h": {
-                    "ema": 0.53,
-                    "macd": 0.02,
-                    "macd_signal": 0.015,
-                    "rsi": 60.0,
-                    "atr": 0.015
-                }
-            }
+        data = {}
+        coins = ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP"]
+        prices = {
+            "BTC": 51000.0, "ETH": 2950.0, "SOL": 150.0,
+            "BNB": 300.0, "DOGE": 0.08, "XRP": 0.55
         }
+        
+        for coin in coins:
+            price_val = prices[coin]
+            data[coin] = MarketData(
+                coin=coin,
+                price=Price(coin=coin, price=price_val, timestamp=datetime.utcnow()),
+                klines_3m=pd.DataFrame(),
+                klines_4h=pd.DataFrame(),
+                indicators_3m={
+                    "ema_20": price_val * 0.99,
+                    "macd": 10.0,
+                    "rsi_7": 60.0,
+                    "ema_20_list": [price_val * 0.99],
+                    "macd_list": [10.0],
+                    "rsi_7_list": [60.0],
+                    "rsi_14_list": [55.0]
+                },
+                indicators_4h={
+                    "ema_20": price_val * 0.98,
+                    "ema_50": price_val * 0.95,
+                    "atr_3": price_val * 0.01,
+                    "atr_14": price_val * 0.02,
+                    "macd_list": [20.0],
+                    "rsi_14_list": [58.0]
+                },
+                open_interest=1000000.0,
+                funding_rate=0.0001,
+                volume_current_4h=500000.0,
+                volume_average_4h=450000.0,
+                mid_prices_list=[price_val]
+            )
+        return data
 
     def test_build_prompt_structure(
         self,
@@ -196,52 +131,51 @@ class TestPromptBuilder:
         assert len(prompt) > 5000
 
         # Check that all major sections are present
-        assert "HyperLiquid AI Trading System" in prompt
-        assert "Portfolio Status" in prompt
-        assert "Market Data" in prompt
-        assert "Risk Management Constraints" in prompt
-        assert "Your Task" in prompt
+        assert "Portfolio Status" not in prompt # Renamed/Changed
+        assert "Market Data" not in prompt # Renamed/Changed
+        assert "Risk Management Constraints" not in prompt # Renamed/Changed
+        assert "Your Task" not in prompt # Renamed/Changed
+        
+        # Check for new section headers/content
+        assert "It has been" in prompt
+        assert "ALL OF THE PRICE OR SIGNAL DATA" in prompt
+        assert "HERE IS YOUR ACCOUNT INFORMATION" in prompt
+        assert "TRADING STYLE GUIDELINES" in prompt
 
     def test_build_header_section(self, builder, mock_agent):
         """Test _build_header creates proper header."""
-        header = builder._build_header(mock_agent)
+        header = builder._build_header(minutes_elapsed=10, invocation_count=5)
 
-        assert "HyperLiquid AI Trading System" in header
-        assert "Current Time:" in header
-        assert "UTC" in header
-        assert "trading agent" in header.lower()
-        # Should include strategy description
-        assert "Follow technical indicators" in header
+        assert "10 minutes" in header
+        assert "invoked 5 times" in header
+        assert "UTC" not in header # UTC is not explicitly in the string format used
 
     def test_build_portfolio_section_with_positions(
         self,
         builder,
         mock_account,
-        mock_positions
+        mock_positions,
+        mock_agent
     ):
-        """Test _build_portfolio_section with positions."""
-        section = builder._build_portfolio_section(mock_account, mock_positions)
+        """Test _build_account_section with positions."""
+        section = builder._build_account_section(mock_account, mock_positions, mock_agent)
 
         # Check account balance info
-        assert "$10,000.00" in section
-        assert "$8,000.00" in section
-        assert "$2,000.00" in section
-        assert "$500.00" in section
+        assert "10000.0" in section
+        assert "8000.0" in section
+        assert "Max Allowed Leverage: 10x" in section
 
         # Check positions
         assert "BTC" in section
         assert "ETH" in section
-        assert "long" in section.lower()
-        assert "short" in section.lower()
-        assert "50,000.00" in section  # BTC entry price
-        assert "3,000.00" in section  # ETH entry price
+        assert "50000.0" in section  # BTC entry price
+        assert "3000.0" in section  # ETH entry price
 
-    def test_build_portfolio_section_no_positions(self, builder, mock_account):
-        """Test _build_portfolio_section with no positions."""
-        section = builder._build_portfolio_section(mock_account, [])
+    def test_build_portfolio_section_no_positions(self, builder, mock_account, mock_agent):
+        """Test _build_account_section with no positions."""
+        section = builder._build_account_section(mock_account, [], mock_agent)
 
-        assert "None (all cash)" in section
-        assert "$10,000.00" in section
+        assert "10000.0" in section
 
     def test_build_market_data_section(self, builder, mock_market_data):
         """Test _build_market_data_section includes all coins."""
@@ -255,26 +189,30 @@ class TestPromptBuilder:
         assert "EMA" in section
         assert "MACD" in section
         assert "RSI" in section
-        assert "ATR" in section
 
         # Check timeframes are included
-        assert "3M" in section
-        assert "4H" in section
+        assert "3‑minute intervals" in section
+        assert "4‑hour timeframe" in section
 
         # Check specific values
-        assert "51,000.00" in section  # BTC price
-        assert "2,950.00" in section  # ETH price
+        assert "51000.0" in section  # BTC price
+        assert "2950.0" in section  # ETH price
 
     def test_build_market_data_section_missing_coin(self, builder):
         """Test _build_market_data_section handles missing coin data."""
-        market_data = {
-            "BTC": {
-                "price": 51000.0,
-                "3m": {"ema": 50500.0, "macd": 150.5, "macd_signal": 120.0, "rsi": 65.5, "atr": 500.0},
-                "4h": {"ema": 50000.0, "macd": 200.0, "macd_signal": 180.0, "rsi": 60.0, "atr": 800.0}
-            }
-            # Missing ETH, SOL, etc.
-        }
+        # Create minimal MarketData for BTC
+        btc_data = MarketData(
+            coin="BTC",
+            price=Price(coin="BTC", price=51000.0, timestamp=datetime.utcnow()),
+            klines_3m=pd.DataFrame(), klines_4h=pd.DataFrame(),
+            indicators_3m={"ema_20": 50500.0},
+            indicators_4h={"ema_20": 50000.0},
+            open_interest=None, funding_rate=None,
+            volume_current_4h=None, volume_average_4h=None,
+            mid_prices_list=[]
+        )
+        
+        market_data = {"BTC": btc_data}
 
         section = builder._build_market_data_section(market_data)
 
@@ -282,44 +220,18 @@ class TestPromptBuilder:
         assert "BTC" in section
         assert "ETH" not in section
 
-    def test_build_constraints_section(self, builder, mock_agent):
-        """Test _build_constraints_section includes risk rules."""
-        section = builder._build_constraints_section(mock_agent)
+    def test_build_system_instruction(self, builder):
+        """Test _build_system_instruction includes instructions."""
+        section = builder._build_system_instruction()
 
         # Check risk management rules
-        assert "Risk Management Constraints" in section
-        assert "20.0%" in section  # max_position_size
-        assert "10x" in section  # max_leverage
-        assert "2.0%" in section  # stop_loss_pct
-        assert "5.0%" in section  # take_profit_pct
-        assert "Follow technical indicators" in section  # strategy_description
-
-    def test_build_task_section(self, builder):
-        """Test _build_task_section includes JSON format."""
-        section = builder._build_task_section()
-
-        # Check task instructions
-        assert "Your Task" in section
-        assert "JSON object" in section
-
-        # Check JSON fields are documented
-        assert "reasoning" in section
-        assert "action" in section
-        assert "coin" in section
-        assert "size_usd" in section
-        assert "leverage" in section
-        assert "stop_loss_price" in section
-        assert "take_profit_price" in section
-        assert "confidence" in section
-
-        # Check action types
-        assert "OPEN_LONG" in section
-        assert "OPEN_SHORT" in section
-        assert "CLOSE_POSITION" in section
-        assert "HOLD" in section
-
-        # Check examples are present
-        assert "Example" in section
+        assert "AVOID OVER-TRADING" in section
+        assert "High Conviction Only" in section
+        
+        # Check JSON format instructions
+        assert "CHAIN_OF_THOUGHT" in section
+        assert "TRADING_DECISIONS" in section
+        assert "JSON" in section
 
     def test_build_full_prompt_length(
         self,
@@ -355,5 +267,5 @@ class TestPromptBuilder:
             agent=mock_agent
         )
 
-        assert "None (all cash)" in prompt
+        assert "Current live positions & performance: \n\n" in prompt
         assert len(prompt) > 5000

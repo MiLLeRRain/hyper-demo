@@ -211,8 +211,8 @@ class TestHyperliquidClient:
         client = HyperliquidClient("https://test.api")
 
         mock_response = [
-            {"coin": "BTC", "openInterest": "1234567890"},
-            {"coin": "ETH", "openInterest": "987654321"},
+            [{"name": "BTC"}, {"name": "ETH"}],  # Universe
+            [{"openInterest": "1234567890"}, {"openInterest": "987654321"}]  # Asset Ctxs
         ]
 
         mocker.patch.object(client, "_post", return_value=mock_response)
@@ -225,7 +225,7 @@ class TestHyperliquidClient:
         """Test get_open_interest returns 0 for non-existent coin."""
         client = HyperliquidClient("https://test.api")
 
-        mocker.patch.object(client, "_post", return_value=[])
+        mocker.patch.object(client, "_post", return_value=[[], []])
 
         oi = client.get_open_interest("NONEXISTENT")
 
@@ -236,8 +236,8 @@ class TestHyperliquidClient:
         client = HyperliquidClient("https://test.api")
 
         mock_response = [
-            {"coin": "BTC", "funding": "0.0001"},
-            {"coin": "ETH", "funding": "-0.00005"},
+            [{"name": "BTC"}, {"name": "ETH"}],
+            [{"funding": "0.0001"}, {"funding": "-0.00005"}]
         ]
 
         mocker.patch.object(client, "_post", return_value=mock_response)

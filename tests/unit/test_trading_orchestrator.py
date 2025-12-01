@@ -123,7 +123,7 @@ class TestTradingOrchestrator:
 
     def test_initialize(self, orchestrator, mock_executor):
         """Test TradingOrchestrator initialization."""
-        assert orchestrator.executor == mock_executor
+        assert orchestrator.executors["default"] == mock_executor
         assert orchestrator.order_manager is not None
         assert orchestrator.position_manager is not None
         assert orchestrator.risk_manager is not None
@@ -473,4 +473,4 @@ class TestTradingOrchestrator:
         """Test string representation."""
         repr_str = repr(orchestrator)
         assert "TradingOrchestrator" in repr_str
-        assert "0x" in repr_str
+        assert "executors=" in repr_str

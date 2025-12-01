@@ -136,7 +136,7 @@ class TestDataCollector:
         collector = DataCollector(mock_exchange_config, mock_trading_config)
 
         # Mock collect_coin_data
-        def mock_collect(coin):
+        def mock_collect(coin, price=None):
             return MarketData(
                 coin=coin,
                 price=mock_price_data[coin],
@@ -171,7 +171,7 @@ class TestDataCollector:
         collector = DataCollector(mock_exchange_config, mock_trading_config)
 
         # Mock: BTC succeeds, ETH fails, SOL succeeds
-        def mock_collect(coin):
+        def mock_collect(coin, price=None):
             if coin == "ETH":
                 raise Exception("ETH API error")
             return MarketData(

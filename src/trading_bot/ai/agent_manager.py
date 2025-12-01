@@ -5,9 +5,9 @@ from typing import Dict, List
 
 from sqlalchemy.orm import Session
 
-from trading_bot.models.database import TradingAgent
-from trading_bot.config.models import LLMConfig
-from trading_bot.ai.providers import BaseLLMProvider, OfficialAPIProvider, OpenRouterProvider
+from src.trading_bot.models.database import TradingAgent
+from src.trading_bot.config.models import LLMConfig
+from src.trading_bot.ai.providers import BaseLLMProvider, OfficialAPIProvider, OpenRouterProvider
 
 logger = logging.getLogger(__name__)
 

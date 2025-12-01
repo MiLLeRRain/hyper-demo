@@ -140,45 +140,49 @@ Here's my decision:
 
 ```json
 {
-  "reasoning": "BTC shows bullish momentum with RSI at 45",
-  "action": "OPEN_LONG",
-  "coin": "BTC",
-  "size_usd": 1000.0,
-  "leverage": 3,
-  "stop_loss_price": 49000.0,
-  "take_profit_price": 52000.0,
-  "confidence": 0.75
+  "BTC": {
+    "reasoning": "BTC shows bullish momentum with RSI at 45",
+    "signal": "long",
+    "risk_usd": 333.33,
+    "leverage": 3,
+    "stop_loss": 49000.0,
+    "profit_target": 52000.0,
+    "confidence": 0.75
+  }
 }
 ```
 
 This is a good opportunity.
 """
 
-        decision = parser.parse(llm_response)
+        decisions = parser.parse(llm_response)
 
-        assert decision is not None
+        assert decisions
+        decision = decisions[0]
         assert decision.action == "OPEN_LONG"
         assert decision.coin == "BTC"
-        assert decision.size_usd == 1000.0
+        assert decision.size_usd == 999.99
 
     def test_parse_raw_json(self, parser):
         """Test parsing raw JSON without code block."""
         llm_response = """
 {
-  "reasoning": "No clear trading opportunity right now",
-  "action": "HOLD",
-  "coin": "BTC",
-  "size_usd": 0.0,
-  "leverage": 1,
-  "stop_loss_price": 0.0,
-  "take_profit_price": 0.0,
-  "confidence": 0.5
+  "BTC": {
+    "reasoning": "No clear trading opportunity right now",
+    "signal": "hold",
+    "risk_usd": 0.0,
+    "leverage": 1,
+    "stop_loss": 0.0,
+    "profit_target": 0.0,
+    "confidence": 0.5
+  }
 }
 """
 
-        decision = parser.parse(llm_response)
+        decisions = parser.parse(llm_response)
 
-        assert decision is not None
+        assert decisions
+        decision = decisions[0]
         assert decision.action == "HOLD"
 
     def test_parse_json_with_extra_text(self, parser):
@@ -189,47 +193,50 @@ Let me analyze the market conditions...
 After careful consideration, here's my decision:
 
 {
-  "reasoning": "ETH position has reached take profit target",
-  "action": "CLOSE_POSITION",
-  "coin": "ETH",
-  "size_usd": 0.0,
-  "leverage": 1,
-  "stop_loss_price": 0.0,
-  "take_profit_price": 0.0,
-  "confidence": 0.85
+  "ETH": {
+    "justification": "ETH position has reached take profit target",
+    "signal": "close",
+    "risk_usd": 0.0,
+    "leverage": 1,
+    "stop_loss": 0.0,
+    "profit_target": 0.0,
+    "confidence": 0.85
+  }
 }
 
 I recommend taking profits now.
 """
 
-        decision = parser.parse(llm_response)
+        decisions = parser.parse(llm_response)
 
-        assert decision is not None
+        assert decisions
+        decision = decisions[0]
         assert decision.action == "CLOSE_POSITION"
         assert decision.coin == "ETH"
 
     def test_parse_invalid_json(self, parser):
-        """Test that invalid JSON returns None."""
+        """Test that invalid JSON returns empty list."""
         llm_response = "This is not JSON at all!"
 
-        decision = parser.parse(llm_response)
+        decisions = parser.parse(llm_response)
 
-        assert decision is None
+        assert decisions == []
 
     def test_parse_json_missing_required_field(self, parser):
-        """Test that JSON missing required field returns None."""
+        """Test that JSON missing required field returns empty list."""
         llm_response = """
 ```json
 {
-  "action": "OPEN_LONG",
-  "coin": "BTC"
+  "BTC": {
+    "signal": "long"
+  }
 }
 ```
 """
 
-        decision = parser.parse(llm_response)
+        decisions = parser.parse(llm_response)
 
-        assert decision is None
+        assert decisions == []
 
     def test_validate_decision_logic_already_has_position(self, parser):
         """Test validation catches opening position when one exists."""
