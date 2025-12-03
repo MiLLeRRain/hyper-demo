@@ -92,7 +92,7 @@ class TestOfficialAPIProvider:
         assert provider.client is not None
         assert provider.async_client is not None
 
-    @patch("src.trading_bot.ai.providers.official.OpenAI")
+    @patch("src.trading_bot.ai.providers.openai_compatible.OpenAI")
     def test_generate_success(self, mock_openai_class, mock_openai_response):
         """Test successful generate call."""
         # Setup mock
@@ -124,7 +124,7 @@ class TestOfficialAPIProvider:
         assert call_kwargs["max_tokens"] == 100
         assert call_kwargs["temperature"] == 0.7
 
-    @patch("src.trading_bot.ai.providers.official.AsyncOpenAI")
+    @patch("src.trading_bot.ai.providers.openai_compatible.AsyncOpenAI")
     @pytest.mark.asyncio
     async def test_generate_async_success(self, mock_async_openai_class, mock_openai_response):
         """Test successful generate_async call."""
@@ -170,7 +170,7 @@ class TestOpenRouterProvider:
         assert provider.client is not None
         assert provider.async_client is not None
 
-    @patch("src.trading_bot.ai.providers.openrouter.OpenAI")
+    @patch("src.trading_bot.ai.providers.openai_compatible.OpenAI")
     def test_generate_with_retry(self, mock_openai_class):
         """Test that generate retries on failure."""
         # Setup mock to fail twice then succeed

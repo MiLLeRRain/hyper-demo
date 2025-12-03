@@ -21,22 +21,29 @@ class TestOrderManager:
         return executor
 
     @pytest.fixture
-    def mock_db(self):
+    def mock_session(self):
         """Create mock database session."""
-        db = Mock()
-        return db
+        session = Mock()
+        return session
 
     @pytest.fixture
-    def order_manager(self, mock_executor, mock_db):
-        """Create OrderManager instance."""
-        return OrderManager(mock_executor, mock_db)
+    def mock_db_manager(self, mock_session):
+        """Create mock database manager."""
+        db_manager = MagicMock()
+        db_manager.session_scope.return_value.__enter__.return_value = mock_session
+        return db_manager
 
-    def test_initialize(self, order_manager, mock_executor):
+    @pytest.fixture
+    def order_manager(self, mock_executor, mock_db_manager):
+        """Create OrderManager instance."""
+        return OrderManager(mock_executor, mock_db_manager)
+
+    def test_initialize(self, order_manager, mock_executor, mock_db_manager):
         """Test OrderManager initialization."""
         assert order_manager.executor == mock_executor
-        assert order_manager.db is not None
+        assert order_manager.db_manager == mock_db_manager
 
-    def test_execute_trade_success(self, order_manager, mock_executor, mock_db):
+    def test_execute_trade_success(self, order_manager, mock_executor, mock_session):
         """Test successful trade execution."""
         # Mock executor response
         mock_executor.place_order.return_value = (True, 12345, None)
@@ -61,10 +68,11 @@ class TestOrderManager:
         mock_executor.place_order.assert_called_once()
 
         # Verify database operations
-        mock_db.add.assert_called_once()
-        mock_db.commit.assert_called_once()
+        mock_session.add.assert_called_once()
+        # session_scope handles commit, so we don't check commit on session directly unless we passed it
+        # But here we rely on session_scope context manager
 
-    def test_execute_trade_order_failure(self, order_manager, mock_executor, mock_db):
+    def test_execute_trade_order_failure(self, order_manager, mock_executor, mock_session):
         """Test trade execution when order placement fails."""
         # Mock executor failure
         mock_executor.place_order.return_value = (False, None, "Insufficient margin")
@@ -82,17 +90,18 @@ class TestOrderManager:
         assert trade is None
         assert error == "Insufficient margin"
 
-        # Should not commit to database
-        mock_db.commit.assert_not_called()
+        # Should not add to database
+        mock_session.add.assert_not_called()
 
-    def test_execute_trade_db_failure(self, order_manager, mock_executor, mock_db):
-        """Test trade execution when database commit fails."""
+    def test_execute_trade_db_failure(self, order_manager, mock_executor, mock_db_manager, mock_session):
+        """Test trade execution when database operation fails."""
         # Mock executor success
         mock_executor.place_order.return_value = (True, 12345, None)
         mock_executor.cancel_order.return_value = (True, None)
 
         # Mock database failure
-        mock_db.commit.side_effect = Exception("Database error")
+        # We simulate failure by making session_scope raise exception
+        mock_db_manager.session_scope.side_effect = Exception("Database error")
 
         success, trade, error = order_manager.execute_trade(
             agent_id=uuid4(),
@@ -107,11 +116,10 @@ class TestOrderManager:
         assert trade is None
         assert "Database error" in error
 
-        # Should rollback and try to cancel orphaned order
-        mock_db.rollback.assert_called_once()
+        # Should try to cancel orphaned order
         mock_executor.cancel_order.assert_called_once_with("BTC", 12345)
 
-    def test_execute_short_trade(self, order_manager, mock_executor, mock_db):
+    def test_execute_short_trade(self, order_manager, mock_executor):
         """Test executing a short trade."""
         mock_executor.place_order.return_value = (True, 67890, None)
 
@@ -130,7 +138,7 @@ class TestOrderManager:
         call_args = mock_executor.place_order.call_args
         assert call_args[1]["is_buy"] is False
 
-    def test_execute_market_order(self, order_manager, mock_executor, mock_db):
+    def test_execute_market_order(self, order_manager, mock_executor):
         """Test executing market order."""
         from src.trading_bot.trading.hyperliquid_executor import OrderType
 
@@ -151,7 +159,7 @@ class TestOrderManager:
         call_args = mock_executor.place_order.call_args
         assert call_args[1]["order_type"] == OrderType.MARKET
 
-    def test_cancel_trade_success(self, order_manager, mock_executor, mock_db):
+    def test_cancel_trade_success(self, order_manager, mock_executor, mock_session):
         """Test successful trade cancellation."""
         trade_id = uuid4()
 
@@ -162,7 +170,7 @@ class TestOrderManager:
         mock_trade.coin = "BTC"
         mock_trade.hyperliquid_order_id = "12345"
 
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_trade
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_trade
         mock_executor.cancel_order.return_value = (True, None)
 
         success, error = order_manager.cancel_trade(trade_id)
@@ -176,37 +184,36 @@ class TestOrderManager:
         # Verify trade status updated
         assert mock_trade.status == "cancelled"
         assert mock_trade.exit_time is not None
-        mock_db.commit.assert_called_once()
 
-    def test_cancel_trade_not_found(self, order_manager, mock_db):
+    def test_cancel_trade_not_found(self, order_manager, mock_session):
         """Test cancelling non-existent trade."""
-        mock_db.query.return_value.filter_by.return_value.first.return_value = None
+        mock_session.query.return_value.filter_by.return_value.first.return_value = None
 
         success, error = order_manager.cancel_trade(uuid4())
 
         assert success is False
         assert error == "Trade not found"
 
-    def test_cancel_trade_already_closed(self, order_manager, mock_db):
+    def test_cancel_trade_already_closed(self, order_manager, mock_session):
         """Test cancelling already closed trade."""
         mock_trade = Mock(spec=AgentTrade)
         mock_trade.status = "closed"
 
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_trade
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_trade
 
         success, error = order_manager.cancel_trade(uuid4())
 
         assert success is False
         assert "Cannot cancel" in error
 
-    def test_cancel_trade_exchange_failure(self, order_manager, mock_executor, mock_db):
+    def test_cancel_trade_exchange_failure(self, order_manager, mock_executor, mock_session):
         """Test trade cancellation when exchange cancel fails."""
         mock_trade = Mock(spec=AgentTrade)
         mock_trade.status = "open"
         mock_trade.coin = "BTC"
         mock_trade.hyperliquid_order_id = "12345"
 
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_trade
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_trade
         mock_executor.cancel_order.return_value = (False, "Order not found")
 
         success, error = order_manager.cancel_trade(uuid4())
@@ -214,7 +221,7 @@ class TestOrderManager:
         assert success is False
         assert error == "Order not found"
 
-    def test_close_trade_success(self, order_manager, mock_db):
+    def test_close_trade_success(self, order_manager, mock_session):
         """Test closing a trade."""
         trade_id = uuid4()
 
@@ -222,7 +229,7 @@ class TestOrderManager:
         mock_trade.id = trade_id
         mock_trade.status = "open"
 
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_trade
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_trade
 
         success, error = order_manager.close_trade(
             trade_id=trade_id,
@@ -241,42 +248,40 @@ class TestOrderManager:
         assert mock_trade.status == "closed"
         assert mock_trade.exit_time is not None
 
-        mock_db.commit.assert_called_once()
-
-    def test_close_trade_not_found(self, order_manager, mock_db):
+    def test_close_trade_not_found(self, order_manager, mock_session):
         """Test closing non-existent trade."""
-        mock_db.query.return_value.filter_by.return_value.first.return_value = None
+        mock_session.query.return_value.filter_by.return_value.first.return_value = None
 
         success, error = order_manager.close_trade(uuid4())
 
         assert success is False
         assert error == "Trade not found"
 
-    def test_close_trade_already_closed(self, order_manager, mock_db):
+    def test_close_trade_already_closed(self, order_manager, mock_session):
         """Test closing already closed trade."""
         mock_trade = Mock(spec=AgentTrade)
         mock_trade.status = "closed"
 
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_trade
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_trade
 
         success, error = order_manager.close_trade(uuid4())
 
         assert success is False
         assert error == "Trade already closed"
 
-    def test_get_trade(self, order_manager, mock_db):
+    def test_get_trade(self, order_manager, mock_session):
         """Test getting a trade by ID."""
         trade_id = uuid4()
         mock_trade = Mock(spec=AgentTrade)
 
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_trade
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_trade
 
         trade = order_manager.get_trade(trade_id)
 
         assert trade == mock_trade
-        mock_db.query.assert_called()
+        mock_session.query.assert_called()
 
-    def test_get_agent_trades(self, order_manager, mock_db):
+    def test_get_agent_trades(self, order_manager, mock_session):
         """Test getting trades for an agent."""
         agent_id = uuid4()
         mock_trades = [Mock(spec=AgentTrade) for _ in range(3)]
@@ -287,14 +292,14 @@ class TestOrderManager:
         mock_query.limit.return_value = mock_query
         mock_query.all.return_value = mock_trades
 
-        mock_db.query.return_value = mock_query
+        mock_session.query.return_value = mock_query
 
         trades = order_manager.get_agent_trades(agent_id)
 
         assert len(trades) == 3
         assert trades == mock_trades
 
-    def test_get_agent_trades_with_status_filter(self, order_manager, mock_db):
+    def test_get_agent_trades_with_status_filter(self, order_manager, mock_session):
         """Test getting trades filtered by status."""
         agent_id = uuid4()
 
@@ -304,14 +309,14 @@ class TestOrderManager:
         mock_query.limit.return_value = mock_query
         mock_query.all.return_value = []
 
-        mock_db.query.return_value = mock_query
+        mock_session.query.return_value = mock_query
 
         trades = order_manager.get_agent_trades(agent_id, status="open")
 
         # Verify filter_by was called twice (once for agent_id, once for status)
         assert mock_query.filter_by.call_count == 2
 
-    def test_get_open_trades(self, order_manager, mock_db):
+    def test_get_open_trades(self, order_manager, mock_session):
         """Test getting open trades."""
         agent_id = uuid4()
 
@@ -321,24 +326,24 @@ class TestOrderManager:
         mock_query.limit.return_value = mock_query
         mock_query.all.return_value = []
 
-        mock_db.query.return_value = mock_query
+        mock_session.query.return_value = mock_query
 
         trades = order_manager.get_open_trades(agent_id)
 
         # Should filter by status="open"
         assert mock_query.filter_by.call_count == 2
 
-    def test_get_trade_by_order_id(self, order_manager, mock_db):
+    def test_get_trade_by_order_id(self, order_manager, mock_session):
         """Test getting trade by HyperLiquid order ID."""
         mock_trade = Mock(spec=AgentTrade)
 
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_trade
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_trade
 
         trade = order_manager.get_trade_by_order_id("12345")
 
         assert trade == mock_trade
 
-    def test_batch_cancel_trades(self, order_manager, mock_executor, mock_db):
+    def test_batch_cancel_trades(self, order_manager, mock_executor, mock_session):
         """Test batch cancelling multiple trades."""
         trade_ids = [uuid4(), uuid4(), uuid4()]
 
@@ -349,7 +354,7 @@ class TestOrderManager:
             Mock(spec=AgentTrade, status="open", coin="SOL", hyperliquid_order_id="3")
         ]
 
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = mock_trades
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = mock_trades
         mock_executor.cancel_order.return_value = (True, None)
 
         results = order_manager.batch_cancel_trades(trade_ids)
@@ -360,7 +365,7 @@ class TestOrderManager:
             assert success is True
             assert error is None
 
-    def test_get_trade_statistics(self, order_manager, mock_db):
+    def test_get_trade_statistics(self, order_manager, mock_session):
         """Test getting trade statistics."""
         agent_id = uuid4()
 
@@ -372,7 +377,7 @@ class TestOrderManager:
             Mock(spec=AgentTrade, status="cancelled", realized_pnl=None, fees=None),
         ]
 
-        mock_db.query.return_value.filter_by.return_value.all.return_value = mock_trades
+        mock_session.query.return_value.filter_by.return_value.all.return_value = mock_trades
 
         stats = order_manager.get_trade_statistics(agent_id)
 

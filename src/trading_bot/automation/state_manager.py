@@ -7,6 +7,8 @@ from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
+from ..infrastructure.database import DatabaseManager
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,14 +19,14 @@ class StateManager:
     Stores state in database for recovery after restart.
     """
 
-    def __init__(self, db_session: Session):
+    def __init__(self, db_manager: DatabaseManager):
         """
         Initialize state manager.
 
         Args:
-            db_session: Database session
+            db_manager: Database manager
         """
-        self.db = db_session
+        self.db_manager = db_manager
         self._ensure_state_table()
 
     def save_state(self, state: Dict[str, Any]) -> None:
@@ -46,19 +48,19 @@ class StateManager:
                 DO UPDATE SET value = :state, updated_at = :updated_at
             """)
 
-            self.db.execute(
-                query,
-                {
-                    "state": str(serialized_state),
-                    "updated_at": datetime.utcnow()
-                }
-            )
-            self.db.commit()
+            with self.db_manager.session_scope() as session:
+                session.execute(
+                    query,
+                    {
+                        "state": str(serialized_state),
+                        "updated_at": datetime.utcnow()
+                    }
+                )
+                # Commit handled by session_scope
 
             logger.debug(f"State saved: {len(str(serialized_state))} bytes")
 
         except Exception as e:
-            self.db.rollback()
             logger.error(f"Failed to save state: {e}", exc_info=True)
 
     def load_state(self) -> Optional[Dict[str, Any]]:
@@ -75,17 +77,18 @@ class StateManager:
                 WHERE key = 'trading_bot_state'
             """)
 
-            result = self.db.execute(query).fetchone()
+            with self.db_manager.session_scope() as session:
+                result = session.execute(query).fetchone()
 
-            if result:
-                state_str = result[0]
-                updated_at = result[1]
+                if result:
+                    state_str = result[0]
+                    updated_at = result[1]
 
-                # Parse state string back to dict
-                state = eval(state_str)  # Safe here as we control the format
+                    # Parse state string back to dict
+                    state = eval(state_str)  # Safe here as we control the format
 
-                logger.debug(f"State loaded (last updated: {updated_at})")
-                return self._deserialize_state(state)
+                    logger.debug(f"State loaded (last updated: {updated_at})")
+                    return self._deserialize_state(state)
 
             logger.debug("No saved state found")
             return None
@@ -141,11 +144,11 @@ class StateManager:
         """Clear all state (for testing)."""
         try:
             query = text("DELETE FROM bot_state WHERE key = 'trading_bot_state'")
-            self.db.execute(query)
-            self.db.commit()
+            with self.db_manager.session_scope() as session:
+                session.execute(query)
+                # Commit handled by session_scope
             logger.info("State cleared")
         except Exception as e:
-            self.db.rollback()
             logger.error(f"Failed to clear state: {e}")
 
     def _ensure_state_table(self) -> None:
@@ -160,13 +163,13 @@ class StateManager:
                 )
             """)
 
-            self.db.execute(create_table_query)
-            self.db.commit()
+            with self.db_manager.session_scope() as session:
+                session.execute(create_table_query)
+                # Commit handled by session_scope
 
             logger.debug("bot_state table ensured")
 
         except Exception as e:
-            self.db.rollback()
             logger.warning(f"Failed to create bot_state table: {e}")
 
     def _serialize_state(self, state: Dict[str, Any]) -> Dict[str, Any]:

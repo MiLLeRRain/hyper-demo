@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import Mock, MagicMock
+from contextlib import contextmanager
 from decimal import Decimal
 from uuid import uuid4
 from src.trading_bot.trading.position_manager import PositionManager
@@ -11,6 +12,18 @@ class TestPositionManagerLive:
     @pytest.fixture
     def mock_db_session(self):
         return MagicMock()
+
+    @pytest.fixture
+    def mock_db_manager(self, mock_db_session):
+        manager = MagicMock()
+        
+        @contextmanager
+        def mock_scope():
+            yield mock_db_session
+            mock_db_session.commit()
+            
+        manager.session_scope.side_effect = mock_scope
+        return manager
 
     @pytest.fixture
     def mock_info_client(self):
@@ -30,7 +43,7 @@ class TestPositionManagerLive:
     def agent_id(self):
         return uuid4()
 
-    def test_get_current_positions_live_sync(self, mock_db_session, mock_info_client, mock_executor, agent_id):
+    def test_get_current_positions_live_sync(self, mock_db_manager, mock_db_session, mock_info_client, mock_executor, agent_id):
         # Setup DB trade
         trade = MagicMock(spec=AgentTrade)
         trade.id = 1
@@ -59,7 +72,7 @@ class TestPositionManagerLive:
             ]
         }
 
-        manager = PositionManager(mock_info_client, mock_db_session, mock_executor)
+        manager = PositionManager(mock_info_client, mock_db_manager, mock_executor)
         positions = manager.get_current_positions(agent_id)
 
         assert len(positions) == 1
@@ -68,7 +81,7 @@ class TestPositionManagerLive:
         assert pos.leverage == 20  # Should take from exchange
         assert pos.liquidation_price == 38000.0
 
-    def test_get_current_positions_live_sync_mismatch_closed(self, mock_db_session, mock_info_client, mock_executor, agent_id):
+    def test_get_current_positions_live_sync_mismatch_closed(self, mock_db_manager, mock_db_session, mock_info_client, mock_executor, agent_id):
         # DB says open, Exchange says 0 size (closed)
         trade = MagicMock(spec=AgentTrade)
         trade.id = 1
@@ -93,7 +106,7 @@ class TestPositionManagerLive:
             ]
         }
 
-        manager = PositionManager(mock_info_client, mock_db_session, mock_executor)
+        manager = PositionManager(mock_info_client, mock_db_manager, mock_executor)
         positions = manager.get_current_positions(agent_id)
 
         assert len(positions) == 0
@@ -101,7 +114,7 @@ class TestPositionManagerLive:
         assert "Auto-closed" in trade.notes
         mock_db_session.commit.assert_called()
 
-    def test_get_account_value_live(self, mock_db_session, mock_info_client, mock_executor, agent_id):
+    def test_get_account_value_live(self, mock_db_manager, mock_db_session, mock_info_client, mock_executor, agent_id):
         agent = MagicMock(spec=TradingAgent)
         agent.id = agent_id
         agent.name = "Test Agent"
@@ -118,14 +131,14 @@ class TestPositionManagerLive:
             "assetPositions": []
         }
 
-        manager = PositionManager(mock_info_client, mock_db_session, mock_executor)
+        manager = PositionManager(mock_info_client, mock_db_manager, mock_executor)
         account_info = manager.get_account_value(agent_id)
 
         assert account_info.account_value == 10000.0
         assert account_info.withdrawable == 5000.0
         assert account_info.margin_used == 2000.0
 
-    def test_get_account_value_live_failure_fallback(self, mock_db_session, mock_info_client, mock_executor, agent_id):
+    def test_get_account_value_live_failure_fallback(self, mock_db_manager, mock_db_session, mock_info_client, mock_executor, agent_id):
         agent = MagicMock(spec=TradingAgent)
         agent.id = agent_id
         agent.initial_balance = Decimal("1000.0")
@@ -138,7 +151,7 @@ class TestPositionManagerLive:
         # Make exchange call fail
         mock_executor.info.user_state.side_effect = Exception("API Error")
 
-        manager = PositionManager(mock_info_client, mock_db_session, mock_executor)
+        manager = PositionManager(mock_info_client, mock_db_manager, mock_executor)
         
         # Should fallback to calculation
         account_info = manager.get_account_value(agent_id)

@@ -15,7 +15,9 @@ from pathlib import Path
 from decimal import Decimal
 
 # Add src directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root / "src"))
+sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
 
@@ -46,6 +48,9 @@ def main():
 
     # Configuration
     private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY")
+    if not private_key:
+        private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY_DEFAULT")
+        
     if not private_key:
         print("\n[ERROR] HYPERLIQUID_PRIVATE_KEY not found in .env")
         return 1
@@ -301,7 +306,7 @@ Provide only the JSON response, no additional text."""
 
                     # Cancel the order (cleanup)
                     print(f"\n  Cancelling test order...")
-                    cancel_success, cancel_error = executor.cancel_order(order_id)
+                    cancel_success, cancel_error = executor.cancel_order(coin, order_id)
 
                     if cancel_success:
                         print(f"  [OK] Order cancelled successfully")

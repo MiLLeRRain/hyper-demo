@@ -8,7 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+from trading_bot.infrastructure.database import DatabaseManager
 
 
 def main():
@@ -40,8 +41,9 @@ def main():
     print(f"\n  Connecting to: postgresql://{db_user}:***@{db_host}:{db_port}/{db_name}")
 
     try:
-        # Create engine
-        engine = create_engine(db_url, echo=False)
+        # Initialize DatabaseManager
+        db_manager = DatabaseManager(db_url)
+        engine = db_manager.engine
 
         # Test connection
         with engine.connect() as conn:

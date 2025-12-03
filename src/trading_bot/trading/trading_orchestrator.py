@@ -15,6 +15,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from ..infrastructure.database import DatabaseManager
 from ..models.database import AgentDecision, TradingAgent
 from ..risk.risk_manager import RiskManager
 from .hyperliquid_executor import HyperLiquidExecutor, OrderType
@@ -34,11 +35,12 @@ class TradingOrchestrator:
     - Position tracking (PositionManager)
 
     Attributes:
-        executor: HyperLiquidExecutor for exchange operations
+        executors: Map of account names to HyperLiquid executors
+        default_executor: Fallback executor
         order_manager: OrderManager for order lifecycle management
         position_manager: PositionManager for position tracking
         risk_manager: RiskManager for risk validation
-        db: SQLAlchemy database session
+        db_manager: DatabaseManager instance
     """
 
     def __init__(
@@ -48,7 +50,7 @@ class TradingOrchestrator:
         order_manager: OrderManager,
         position_manager: PositionManager,
         risk_manager: RiskManager,
-        db_session: Session
+        db_manager: DatabaseManager
     ):
         """Initialize trading orchestrator.
 
@@ -58,14 +60,14 @@ class TradingOrchestrator:
             order_manager: Order manager instance
             position_manager: Position manager instance
             risk_manager: Risk manager instance
-            db_session: Database session
+            db_manager: Database manager instance
         """
         self.executors = executors
         self.default_executor = default_executor
         self.order_manager = order_manager
         self.position_manager = position_manager
         self.risk_manager = risk_manager
-        self.db = db_session
+        self.db_manager = db_manager
         logger.info(f"TradingOrchestrator initialized with {len(executors)} executors")
 
     def _get_executor(self, agent: TradingAgent) -> HyperLiquidExecutor:
@@ -78,23 +80,37 @@ class TradingOrchestrator:
     def execute_decision(
         self,
         agent_id: UUID,
-        decision_id: UUID
+        decision_id: UUID,
+        session: Optional[Session] = None
     ) -> Tuple[bool, Optional[str]]:
         """Execute an AI trading decision.
 
         Args:
             agent_id: Trading agent ID
             decision_id: AI decision ID to execute
+            session: Optional database session
         """
+        if session:
+            return self._execute_decision_internal(agent_id, decision_id, session)
+        
+        with self.db_manager.session_scope() as local_session:
+            return self._execute_decision_internal(agent_id, decision_id, local_session)
+
+    def _execute_decision_internal(
+        self,
+        agent_id: UUID,
+        decision_id: UUID,
+        session: Session
+    ) -> Tuple[bool, Optional[str]]:
         # Load decision from database
-        decision = self.db.query(AgentDecision).filter_by(id=decision_id).first()
+        decision = session.query(AgentDecision).filter_by(id=decision_id).first()
 
         if not decision:
             logger.error(f"Decision not found: {decision_id}")
             return False, "Decision not found"
 
         # Load agent from database
-        agent = self.db.query(TradingAgent).filter_by(id=agent_id).first()
+        agent = session.query(TradingAgent).filter_by(id=agent_id).first()
 
         if not agent:
             logger.error(f"Agent not found: {agent_id}")
@@ -115,10 +131,10 @@ class TradingOrchestrator:
             return True, None
 
         elif decision.action == "CLOSE_POSITION":
-            return self._close_position(agent_id, decision, executor)
+            return self._close_position(agent_id, decision, executor, session)
 
         elif decision.action in ["OPEN_LONG", "OPEN_SHORT"]:
-            return self._open_position(agent_id, agent, decision, executor)
+            return self._open_position(agent_id, agent, decision, executor, session)
 
         else:
             logger.error(f"Unknown action: {decision.action}")
@@ -129,7 +145,8 @@ class TradingOrchestrator:
         agent_id: UUID,
         agent: TradingAgent,
         decision: AgentDecision,
-        executor: HyperLiquidExecutor
+        executor: HyperLiquidExecutor,
+        session: Session
     ) -> Tuple[bool, Optional[str]]:
         """Open a new position.
 
@@ -138,6 +155,7 @@ class TradingOrchestrator:
             agent: TradingAgent database object
             decision: AgentDecision to execute
             executor: Executor to use
+            session: Database session
         """
         logger.info(
             f"Opening position: {decision.action} {decision.coin} "
@@ -150,7 +168,8 @@ class TradingOrchestrator:
             coin=decision.coin,
             size_usd=decision.size_usd,
             leverage=decision.leverage,
-            executor=executor
+            executor=executor,
+            session=session
         )
 
         if not is_valid:
@@ -192,7 +211,8 @@ class TradingOrchestrator:
             price=None,  # Market order
             order_type=OrderType.MARKET,
             reduce_only=False,
-            executor=executor
+            executor=executor,
+            session=session
         )
 
         if not success:
@@ -223,7 +243,8 @@ class TradingOrchestrator:
         self,
         agent_id: UUID,
         decision: AgentDecision,
-        executor: HyperLiquidExecutor
+        executor: HyperLiquidExecutor,
+        session: Session
     ) -> Tuple[bool, Optional[str]]:
         """Close existing position.
 
@@ -231,11 +252,12 @@ class TradingOrchestrator:
             agent_id: Trading agent ID
             decision: AgentDecision with CLOSE_POSITION action
             executor: Executor to use
+            session: Database session
         """
         logger.info(f"Closing position: {decision.coin}")
 
         # Get open positions for the coin
-        positions = self.position_manager.get_current_positions(agent_id, executor=executor)
+        positions = self.position_manager.get_current_positions(agent_id, executor=executor, session=session)
         target_positions = [p for p in positions if p.coin == decision.coin]
 
         if not target_positions:
@@ -356,25 +378,33 @@ class TradingOrchestrator:
             logger.error(f"Failed to place take-profit: {error}")
             return False
 
-    def get_execution_summary(self, agent_id: UUID) -> dict:
+    def get_execution_summary(
+        self,
+        agent_id: UUID,
+        session: Optional[Session] = None
+    ) -> dict:
         """Get trading execution summary for an agent.
 
         Args:
             agent_id: Trading agent ID
+            session: Optional database session
 
         Returns:
             Dictionary with execution metrics
-
-        Example:
-            >>> summary = orchestrator.get_execution_summary(agent_id)
-            >>> print(f"Total trades: {summary['total_trades']}")
         """
+        if session:
+            return self._get_execution_summary_internal(agent_id, session)
+        
+        with self.db_manager.session_scope() as local_session:
+            return self._get_execution_summary_internal(agent_id, local_session)
+
+    def _get_execution_summary_internal(self, agent_id: UUID, session: Session) -> dict:
         # Get trade statistics
-        trade_stats = self.order_manager.get_trade_statistics(agent_id)
+        trade_stats = self.order_manager.get_trade_statistics(agent_id, session=session)
 
         # Get account value
         try:
-            account = self.position_manager.get_account_value(agent_id)
+            account = self.position_manager.get_account_value(agent_id, session=session)
             account_value = account.account_value
             unrealized_pnl = account.unrealized_pnl
         except Exception as e:
@@ -383,7 +413,7 @@ class TradingOrchestrator:
             unrealized_pnl = 0.0
 
         # Get position summary
-        pos_summary = self.position_manager.get_position_summary(agent_id)
+        pos_summary = self.position_manager.get_position_summary(agent_id, session=session)
 
         return {
             "account_value": account_value,

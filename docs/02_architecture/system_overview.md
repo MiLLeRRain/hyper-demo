@@ -1030,8 +1030,54 @@ class ConfigManager:
 
 ---
 
-#### 2.6.3 Database (PostgreSQL)
-**职责**: 数据持久化，支持多agent系统
+#### 2.6.3 Database Manager
+**职责**: 统一管理数据库连接、Session生命周期和连接池
+
+**核心类**:
+```python
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session, scoped_session
+from contextlib import contextmanager
+
+class DatabaseManager:
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super(DatabaseManager, cls).__new__(cls)
+        return cls._instance
+
+    def __init__(self, db_url: str = None, pool_size: int = 5, max_overflow: int = 10):
+        if not hasattr(self, 'engine'):
+            if not db_url:
+                raise ValueError("Database URL required for initialization")
+            
+            self.engine = create_engine(
+                db_url,
+                pool_size=pool_size,
+                max_overflow=max_overflow,
+                pool_recycle=3600
+            )
+            self.session_factory = sessionmaker(bind=self.engine)
+            self.Session = scoped_session(self.session_factory)
+
+    @contextmanager
+    def session(self) -> Generator[Session, None, None]:
+        """提供事务管理的上下文管理器"""
+        session = self.Session()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def get_session(self) -> Session:
+        """获取原始Session（需手动管理）"""
+        return self.Session()
+```
 
 **表设计**:
 ```sql

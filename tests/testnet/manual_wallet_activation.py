@@ -20,6 +20,9 @@ def main():
 
     private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY")
     if not private_key:
+        private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY_DEFAULT")
+        
+    if not private_key:
         print("\n[FAIL] HYPERLIQUID_PRIVATE_KEY not found")
         return 1
 

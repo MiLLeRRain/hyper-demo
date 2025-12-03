@@ -13,6 +13,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from ..infrastructure.database import DatabaseManager
 from ..models.database import AgentTrade, TradingAgent
 from ..models.market_data import Position, AccountInfo
 from ..data.hyperliquid_client import HyperliquidClient
@@ -30,46 +31,60 @@ class PositionManager:
 
     Attributes:
         info_client: HyperLiquid Info API client for market data
-        db: SQLAlchemy database session
+        db_manager: DatabaseManager instance
         executor: Optional HyperLiquidExecutor for fetching user state
     """
 
     def __init__(
         self,
         info_client: HyperliquidClient,
-        db_session: Session,
+        db_manager: DatabaseManager,
         executor: Optional[HyperLiquidExecutor] = None
     ):
         """Initialize position manager.
 
         Args:
             info_client: HyperLiquid Info API client
-            db_session: Database session
+            db_manager: Database manager instance
             executor: Optional HyperLiquidExecutor for user state
 
         Example:
             >>> client = HyperliquidClient("https://api.hyperliquid.xyz")
-            >>> db_session = Session()
-            >>> manager = PositionManager(client, db_session, executor)
+            >>> db_manager = DatabaseManager(...)
+            >>> manager = PositionManager(client, db_manager, executor)
         """
         self.info_client = info_client
-        self.db = db_session
+        self.db_manager = db_manager
         self.executor = executor
         logger.info("PositionManager initialized")
 
     def get_current_positions(
         self,
         agent_id: UUID,
-        executor: Optional[HyperLiquidExecutor] = None
+        executor: Optional[HyperLiquidExecutor] = None,
+        session: Optional[Session] = None
     ) -> List[Position]:
         """Get current open positions for an agent.
 
         Args:
             agent_id: Trading agent ID
             executor: Specific executor to use for fetching user state
+            session: Optional database session
         """
+        if session:
+            return self._get_current_positions_internal(agent_id, executor, session)
+        
+        with self.db_manager.session_scope() as local_session:
+            return self._get_current_positions_internal(agent_id, executor, local_session)
+
+    def _get_current_positions_internal(
+        self,
+        agent_id: UUID,
+        executor: Optional[HyperLiquidExecutor],
+        session: Session
+    ) -> List[Position]:
         # Query open trades from database
-        open_trades = self.db.query(AgentTrade).filter_by(
+        open_trades = session.query(AgentTrade).filter_by(
             agent_id=agent_id,
             status="open"
         ).all()
@@ -109,7 +124,7 @@ class PositionManager:
                     trade.status = "closed"
                     trade.exit_time = datetime.utcnow()
                     trade.notes = (trade.notes or "") + " [Auto-closed by PositionManager sync]"
-                    self.db.commit()
+                    # No commit here, handled by scope or caller
                     continue  # Skip adding to positions list
 
                 # Get current market price
@@ -139,7 +154,7 @@ class PositionManager:
                 if exch_pos and "leverage" in exch_pos:
                     leverage = int(exch_pos["leverage"].get("value", 10))
                 else:
-                    agent = self.db.query(TradingAgent).filter_by(id=agent_id).first()
+                    agent = session.query(TradingAgent).filter_by(id=agent_id).first()
                     leverage = agent.max_leverage if agent else 10
 
                 # Calculate position value
@@ -180,51 +195,72 @@ class PositionManager:
         logger.info(f"Found {len(positions)} open positions for agent {agent_id}")
         return positions
 
-    def get_position(self, agent_id: UUID, coin: str) -> Optional[Position]:
+    def get_position(
+        self,
+        agent_id: UUID,
+        coin: str,
+        session: Optional[Session] = None
+    ) -> Optional[Position]:
         """Get a specific position by coin.
 
         Args:
             agent_id: Trading agent ID
             coin: Trading pair symbol
+            session: Optional database session
 
         Returns:
             Position object or None if no position in this coin
-
-        Example:
-            >>> btc_position = manager.get_position(agent_id, "BTC")
-            >>> if btc_position:
-            ...     print(f"BTC position: {btc_position.size}")
         """
-        positions = self.get_current_positions(agent_id)
+        positions = self.get_current_positions(agent_id, session=session)
         for position in positions:
             if position.coin == coin:
                 return position
         return None
 
-    def has_position(self, agent_id: UUID, coin: str) -> bool:
+    def has_position(
+        self,
+        agent_id: UUID,
+        coin: str,
+        session: Optional[Session] = None
+    ) -> bool:
         """Check if agent has an open position in a coin.
 
         Args:
             agent_id: Trading agent ID
             coin: Trading pair symbol
+            session: Optional database session
 
         Returns:
             True if agent has open position, False otherwise
         """
-        return self.get_position(agent_id, coin) is not None
+        return self.get_position(agent_id, coin, session=session) is not None
 
     def get_account_value(
         self,
         agent_id: UUID,
-        executor: Optional[HyperLiquidExecutor] = None
+        executor: Optional[HyperLiquidExecutor] = None,
+        session: Optional[Session] = None
     ) -> AccountInfo:
         """Calculate agent's account value and metrics.
 
         Args:
             agent_id: Trading agent ID
             executor: Specific executor to use
+            session: Optional database session
         """
-        agent = self.db.query(TradingAgent).filter_by(id=agent_id).first()
+        if session:
+            return self._get_account_value_internal(agent_id, executor, session)
+        
+        with self.db_manager.session_scope() as local_session:
+            return self._get_account_value_internal(agent_id, executor, local_session)
+
+    def _get_account_value_internal(
+        self,
+        agent_id: UUID,
+        executor: Optional[HyperLiquidExecutor],
+        session: Session
+    ) -> AccountInfo:
+        agent = session.query(TradingAgent).filter_by(id=agent_id).first()
 
         if not agent:
             raise ValueError(f"Agent not found: {agent_id}")
@@ -250,7 +286,7 @@ class PositionManager:
                 margin_used = float(margin_summary.get("totalMarginUsed", 0.0))
                 
                 # Calculate unrealized PnL from positions
-                positions = self.get_current_positions(agent_id, executor=active_executor)
+                positions = self.get_current_positions(agent_id, executor=active_executor, session=session)
                 unrealized_pnl = sum(pos.unrealized_pnl for pos in positions)
                 
                 account_info = AccountInfo(
@@ -272,7 +308,7 @@ class PositionManager:
                 # Fallback to calculated value
 
         # Get all open positions
-        positions = self.get_current_positions(agent_id, executor=executor)
+        positions = self.get_current_positions(agent_id, executor=executor, session=session)
 
         # Calculate total position value (notional value)
         position_value = sum(
@@ -283,7 +319,7 @@ class PositionManager:
         unrealized_pnl = sum(pos.unrealized_pnl for pos in positions)
 
         # Calculate total realized PnL from closed trades
-        realized_pnl_query = self.db.query(
+        realized_pnl_query = session.query(
             func.sum(AgentTrade.realized_pnl)
         ).filter_by(
             agent_id=agent_id,
@@ -360,43 +396,39 @@ class PositionManager:
 
         return size
 
-    def get_total_exposure(self, agent_id: UUID) -> float:
+    def get_total_exposure(
+        self,
+        agent_id: UUID,
+        session: Optional[Session] = None
+    ) -> float:
         """Get total exposure (sum of all position values).
 
         Args:
             agent_id: Trading agent ID
+            session: Optional database session
 
         Returns:
             Total exposure in USD
-
-        Example:
-            >>> exposure = manager.get_total_exposure(agent_id)
-            >>> print(f"Total exposure: ${exposure}")
         """
-        positions = self.get_current_positions(agent_id)
+        positions = self.get_current_positions(agent_id, session=session)
         total_exposure = sum(pos.size * pos.mark_price for pos in positions)
         return total_exposure
 
-    def get_position_summary(self, agent_id: UUID) -> Dict[str, any]:
+    def get_position_summary(
+        self,
+        agent_id: UUID,
+        session: Optional[Session] = None
+    ) -> Dict[str, any]:
         """Get a summary of all positions.
 
         Args:
             agent_id: Trading agent ID
+            session: Optional database session
 
         Returns:
-            Dictionary with position summary:
-            - num_positions: Number of open positions
-            - total_value: Total notional value
-            - total_unrealized_pnl: Total unrealized P&L
-            - positions_by_coin: Dict mapping coin to position details
-
-        Example:
-            >>> summary = manager.get_position_summary(agent_id)
-            >>> print(f"Positions: {summary['num_positions']}")
-            >>> for coin, details in summary['positions_by_coin'].items():
-            ...     print(f"{coin}: {details['unrealized_pnl']}")
+            Dictionary with position summary
         """
-        positions = self.get_current_positions(agent_id)
+        positions = self.get_current_positions(agent_id, session=session)
 
         positions_by_coin = {}
         total_value = 0.0

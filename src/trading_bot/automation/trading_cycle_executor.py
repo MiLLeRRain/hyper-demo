@@ -11,6 +11,7 @@ from ..data.collector import DataCollector
 from ..orchestration.multi_agent_orchestrator import MultiAgentOrchestrator
 from ..trading.trading_orchestrator import TradingOrchestrator
 from .state_manager import StateManager
+from ..infrastructure.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class TradingCycleExecutor:
         multi_agent_orchestrator: MultiAgentOrchestrator,
         trading_orchestrator: TradingOrchestrator,
         state_manager: StateManager,
-        db_session: Session
+        db_manager: DatabaseManager
     ):
         """
         Initialize trading cycle executor.
@@ -42,13 +43,13 @@ class TradingCycleExecutor:
             multi_agent_orchestrator: Multi-agent decision component
             trading_orchestrator: Trading execution component
             state_manager: State persistence component
-            db_session: Database session
+            db_manager: Database manager
         """
         self.data_collector = data_collector
         self.multi_agent_orchestrator = multi_agent_orchestrator
         self.trading_orchestrator = trading_orchestrator
         self.state_manager = state_manager
-        self.db = db_session
+        self.db_manager = db_manager
 
     def execute_cycle(self) -> Dict[str, Any]:
         """
@@ -187,8 +188,11 @@ class TradingCycleExecutor:
                         current_error = decision.error_message or ""
                         new_error = f"Execution rejected: {error}"
                         decision.error_message = f"{current_error} | {new_error}" if current_error else new_error
-                        self.db.add(decision)
-                        self.db.commit()
+                        
+                        # Use session scope for update
+                        with self.db_manager.session_scope() as session:
+                            session.add(decision)
+                            # Commit handled by session_scope
 
                 result = {
                     "agent_id": str(agent_id),

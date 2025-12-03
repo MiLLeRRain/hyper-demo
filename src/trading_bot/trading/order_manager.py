@@ -11,11 +11,12 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from ..infrastructure.database import DatabaseManager
 from ..models.database import AgentTrade
 from .hyperliquid_executor import HyperLiquidExecutor, OrderType
 
@@ -37,27 +38,27 @@ class OrderManager:
 
     Attributes:
         executor: HyperLiquidExecutor instance for placing orders
-        db: SQLAlchemy database session
+        db_manager: DatabaseManager instance
     """
 
     def __init__(
         self,
         executor: HyperLiquidExecutor,
-        db_session: Session
+        db_manager: DatabaseManager
     ):
         """Initialize order manager.
 
         Args:
             executor: HyperLiquid executor instance
-            db_session: Database session for trade persistence
+            db_manager: Database manager instance
 
         Example:
             >>> executor = HyperLiquidExecutor(...)
-            >>> db_session = Session()
-            >>> manager = OrderManager(executor, db_session)
+            >>> db_manager = DatabaseManager(...)
+            >>> manager = OrderManager(executor, db_manager)
         """
         self.executor = executor
-        self.db = db_session
+        self.db_manager = db_manager
         logger.info("OrderManager initialized")
 
     def execute_trade(
@@ -71,22 +72,26 @@ class OrderManager:
         order_type: str = OrderType.LIMIT,
         reduce_only: bool = False,
         client_order_id: Optional[str] = None,
-        executor: Optional[HyperLiquidExecutor] = None
+        executor: Optional[HyperLiquidExecutor] = None,
+        session: Optional[Session] = None
     ) -> Tuple[bool, Optional[AgentTrade], Optional[str]]:
         """Execute a trade based on AI decision.
 
         Args:
             executor: Specific executor to use (overrides default)
+            session: Optional database session
             ...
         """
+        # pylint: disable=too-many-positional-arguments
         # Use specific executor if provided, else default
         active_executor = executor or self.executor
 
-        is_buy = (side == OrderSide.LONG)
+        is_buy = side == OrderSide.LONG
 
         logger.info(
-            f"Executing trade: {coin} {side.value.upper()} "
-            f"{size} @ {price or 'MARKET'} (Executor: {active_executor.get_address()})"
+            "Executing trade: %s %s %s @ %s (Executor: %s)",
+            coin, side.value.upper(), size, price or 'MARKET',
+            active_executor.get_address()
         )
 
         # Execute order on exchange
@@ -101,7 +106,7 @@ class OrderManager:
         )
 
         if not success:
-            logger.error(f"Order execution failed: {error}")
+            logger.error("Order execution failed: %s", error)
             return False, None, error
 
         # Create trade record in database
@@ -118,38 +123,67 @@ class OrderManager:
         )
 
         try:
-            self.db.add(trade)
-            self.db.commit()
+            if session:
+                session.add(trade)
+                session.flush()
+            else:
+                with self.db_manager.session_scope() as local_session:
+                    local_session.add(trade)
+                    # session_scope commits on exit
+                    # We need to refresh/expunge to use it outside
+                    local_session.flush()
+                    local_session.refresh(trade)
+                    local_session.expunge(trade)
+
             logger.info(
-                f"Trade recorded: {trade.id} (HyperLiquid OID: {order_id})"
+                "Trade recorded: %s (HyperLiquid OID: %s)",
+                trade.id, order_id
             )
             return True, trade, None
 
-        except Exception as e:
-            self.db.rollback()
-            logger.error(f"Failed to record trade in database: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to record trade in database: %s", e)
 
             # Try to cancel the order since we couldn't record it
             try:
                 active_executor.cancel_order(coin, order_id)
-                logger.warning(f"Cancelled orphaned order {order_id}")
-            except Exception as cancel_error:
-                logger.error(f"Failed to cancel orphaned order: {cancel_error}")
+                logger.warning("Cancelled orphaned order %s", order_id)
+            except Exception as cancel_error:  # pylint: disable=broad-exception-caught
+                logger.error("Failed to cancel orphaned order: %s", cancel_error)
 
             return False, None, str(e)
 
     def cancel_trade(
         self,
         trade_id: UUID,
-        executor: Optional[HyperLiquidExecutor] = None
+        executor: Optional[HyperLiquidExecutor] = None,
+        session: Optional[Session] = None
     ) -> Tuple[bool, Optional[str]]:
         """Cancel an open trade.
 
         Args:
             trade_id: Trade ID to cancel
             executor: Specific executor to use
+            session: Optional database session
         """
-        trade = self.db.query(AgentTrade).filter_by(id=trade_id).first()
+        if session:
+            return self._cancel_trade_internal(trade_id, executor, session)
+
+        try:
+            with self.db_manager.session_scope() as local_session:
+                return self._cancel_trade_internal(trade_id, executor, local_session)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to cancel trade: %s", e)
+            return False, str(e)
+
+    def _cancel_trade_internal(
+        self,
+        trade_id: UUID,
+        executor: Optional[HyperLiquidExecutor],
+        session: Session
+    ) -> Tuple[bool, Optional[str]]:
+        """Internal implementation of cancel_trade."""
+        trade = session.query(AgentTrade).filter_by(id=trade_id).first()
 
         if not trade:
             return False, "Trade not found"
@@ -165,29 +199,23 @@ class OrderManager:
         success, error = active_executor.cancel_order(trade.coin, order_id)
 
         if not success:
-            logger.error(f"Failed to cancel order {order_id}: {error}")
+            logger.error("Failed to cancel order %s: %s", order_id, error)
             return False, error
 
         # Update trade status
         trade.status = "cancelled"
         trade.exit_time = datetime.utcnow()
 
-        try:
-            self.db.commit()
-            logger.info(f"Trade cancelled: {trade_id}")
-            return True, None
-
-        except Exception as e:
-            self.db.rollback()
-            logger.error(f"Failed to update cancelled trade: {e}")
-            return False, str(e)
+        logger.info("Trade cancelled: %s", trade_id)
+        return True, None
 
     def close_trade(
         self,
         trade_id: UUID,
         exit_price: Optional[Decimal] = None,
         realized_pnl: Optional[Decimal] = None,
-        fees: Optional[Decimal] = None
+        fees: Optional[Decimal] = None,
+        session: Optional[Session] = None
     ) -> Tuple[bool, Optional[str]]:
         """Close a trade and update its status.
 
@@ -200,19 +228,37 @@ class OrderManager:
             exit_price: Exit price
             realized_pnl: Realized profit/loss
             fees: Trading fees paid
+            session: Optional database session
 
         Returns:
             Tuple of (success, error_message)
-
-        Example:
-            >>> success, error = manager.close_trade(
-            ...     trade_id=uuid4(),
-            ...     exit_price=Decimal("51000"),
-            ...     realized_pnl=Decimal("100"),
-            ...     fees=Decimal("5")
-            ... )
         """
-        trade = self.db.query(AgentTrade).filter_by(id=trade_id).first()
+        # pylint: disable=too-many-positional-arguments
+        if session:
+            return self._close_trade_internal(
+                trade_id, exit_price, realized_pnl, fees, session
+            )
+
+        try:
+            with self.db_manager.session_scope() as local_session:
+                return self._close_trade_internal(
+                    trade_id, exit_price, realized_pnl, fees, local_session
+                )
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to close trade: %s", e)
+            return False, str(e)
+
+    def _close_trade_internal(
+        self,
+        trade_id: UUID,
+        exit_price: Optional[Decimal],
+        realized_pnl: Optional[Decimal],
+        fees: Optional[Decimal],
+        session: Session
+    ) -> Tuple[bool, Optional[str]]:
+        """Internal implementation of close_trade."""
+        # pylint: disable=too-many-positional-arguments
+        trade = session.query(AgentTrade).filter_by(id=trade_id).first()
 
         if not trade:
             return False, "Trade not found"
@@ -227,35 +273,41 @@ class OrderManager:
         trade.fees = fees
         trade.status = "closed"
 
-        try:
-            self.db.commit()
-            logger.info(
-                f"Trade closed: {trade_id} "
-                f"(PnL: {realized_pnl}, Fees: {fees})"
-            )
-            return True, None
+        logger.info(
+            "Trade closed: %s (PnL: %s, Fees: %s)",
+            trade_id, realized_pnl, fees
+        )
+        return True, None
 
-        except Exception as e:
-            self.db.rollback()
-            logger.error(f"Failed to close trade: {e}")
-            return False, str(e)
-
-    def get_trade(self, trade_id: UUID) -> Optional[AgentTrade]:
+    def get_trade(
+        self,
+        trade_id: UUID,
+        session: Optional[Session] = None
+    ) -> Optional[AgentTrade]:
         """Get a trade record by ID.
 
         Args:
             trade_id: Trade ID
+            session: Optional database session
 
         Returns:
             AgentTrade object or None if not found
         """
-        return self.db.query(AgentTrade).filter_by(id=trade_id).first()
+        if session:
+            return session.query(AgentTrade).filter_by(id=trade_id).first()
+
+        with self.db_manager.session_scope() as local_session:
+            trade = local_session.query(AgentTrade).filter_by(id=trade_id).first()
+            if trade:
+                local_session.expunge(trade)
+            return trade
 
     def get_agent_trades(
         self,
         agent_id: UUID,
         status: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
+        session: Optional[Session] = None
     ) -> List[AgentTrade]:
         """Get trades for a specific agent.
 
@@ -263,103 +315,128 @@ class OrderManager:
             agent_id: Trading agent ID
             status: Filter by status ("open", "closed", "cancelled")
             limit: Maximum number of trades to return
+            session: Optional database session
 
         Returns:
             List of AgentTrade objects
-
-        Example:
-            >>> # Get all open trades
-            >>> open_trades = manager.get_agent_trades(agent_id, status="open")
-            >>> # Get last 50 trades
-            >>> recent_trades = manager.get_agent_trades(agent_id, limit=50)
         """
-        query = self.db.query(AgentTrade).filter_by(agent_id=agent_id)
+        if session:
+            return self._get_agent_trades_internal(agent_id, status, limit, session)
+
+        with self.db_manager.session_scope() as local_session:
+            trades = self._get_agent_trades_internal(
+                agent_id, status, limit, local_session
+            )
+            for trade in trades:
+                local_session.expunge(trade)
+            return trades
+
+    def _get_agent_trades_internal(
+        self,
+        agent_id: UUID,
+        status: Optional[str],
+        limit: int,
+        session: Session
+    ) -> List[AgentTrade]:
+        query = session.query(AgentTrade).filter_by(agent_id=agent_id)
 
         if status:
             query = query.filter_by(status=status)
 
         trades = query.order_by(AgentTrade.entry_time.desc()).limit(limit).all()
-
         return trades
 
-    def get_open_trades(self, agent_id: UUID) -> List[AgentTrade]:
+    def get_open_trades(
+        self,
+        agent_id: UUID,
+        session: Optional[Session] = None
+    ) -> List[AgentTrade]:
         """Get all open trades for an agent.
 
         Args:
             agent_id: Trading agent ID
+            session: Optional database session
 
         Returns:
             List of open AgentTrade objects
         """
-        return self.get_agent_trades(agent_id, status="open")
+        return self.get_agent_trades(agent_id, status="open", session=session)
 
     def get_trade_by_order_id(
         self,
-        hyperliquid_order_id: str
+        hyperliquid_order_id: str,
+        session: Optional[Session] = None
     ) -> Optional[AgentTrade]:
         """Get trade by HyperLiquid order ID.
 
         Args:
             hyperliquid_order_id: HyperLiquid exchange order ID
+            session: Optional database session
 
         Returns:
             AgentTrade object or None
         """
-        return self.db.query(AgentTrade).filter_by(
-            hyperliquid_order_id=hyperliquid_order_id
-        ).first()
+        if session:
+            return session.query(AgentTrade).filter_by(
+                hyperliquid_order_id=hyperliquid_order_id
+            ).first()
+
+        with self.db_manager.session_scope() as local_session:
+            trade = local_session.query(AgentTrade).filter_by(
+                hyperliquid_order_id=hyperliquid_order_id
+            ).first()
+            if trade:
+                local_session.expunge(trade)
+            return trade
 
     def batch_cancel_trades(
         self,
-        trade_ids: List[UUID]
+        trade_ids: List[UUID],
+        session: Optional[Session] = None
     ) -> Dict[UUID, Tuple[bool, Optional[str]]]:
         """Cancel multiple trades at once.
 
         Args:
             trade_ids: List of trade IDs to cancel
+            session: Optional database session
 
         Returns:
             Dictionary mapping trade_id to (success, error_message)
-
-        Example:
-            >>> results = manager.batch_cancel_trades([trade1_id, trade2_id])
-            >>> for trade_id, (success, error) in results.items():
-            ...     if not success:
-            ...         print(f"Failed to cancel {trade_id}: {error}")
         """
         results = {}
 
         for trade_id in trade_ids:
-            success, error = self.cancel_trade(trade_id)
+            success, error = self.cancel_trade(trade_id, session=session)
             results[trade_id] = (success, error)
 
         return results
 
     def get_trade_statistics(
         self,
-        agent_id: UUID
-    ) -> Dict[str, any]:
+        agent_id: UUID,
+        session: Optional[Session] = None
+    ) -> Dict[str, Any]:
         """Get trading statistics for an agent.
 
         Args:
             agent_id: Trading agent ID
+            session: Optional database session
 
         Returns:
-            Dictionary with statistics:
-            - total_trades: Total number of trades
-            - open_trades: Number of open trades
-            - closed_trades: Number of closed trades
-            - cancelled_trades: Number of cancelled trades
-            - total_pnl: Total realized PnL
-            - total_fees: Total fees paid
-
-        Example:
-            >>> stats = manager.get_trade_statistics(agent_id)
-            >>> print(f"Win rate: {stats['closed_trades']} / {stats['total_trades']}")
+            Dictionary with statistics
         """
-        from sqlalchemy import func
+        if session:
+            return self._get_trade_statistics_internal(agent_id, session)
 
-        all_trades = self.db.query(AgentTrade).filter_by(agent_id=agent_id).all()
+        with self.db_manager.session_scope() as local_session:
+            return self._get_trade_statistics_internal(agent_id, local_session)
+
+    def _get_trade_statistics_internal(
+        self,
+        agent_id: UUID,
+        session: Session
+    ) -> Dict[str, Any]:
+        all_trades = session.query(AgentTrade).filter_by(agent_id=agent_id).all()
 
         total_trades = len(all_trades)
         open_trades = sum(1 for t in all_trades if t.status == "open")

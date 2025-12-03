@@ -48,8 +48,7 @@ def _get_service_status() -> dict:
     # Import here to avoid circular imports
     from trading_bot.config.models import load_config
     from trading_bot.automation.state_manager import StateManager
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
+    from trading_bot.infrastructure.database import DatabaseManager
 
     try:
         # Load environment variables
@@ -59,9 +58,8 @@ def _get_service_status() -> dict:
         cfg = load_config('config.yaml')
 
         # Connect to database
-        engine = create_engine(cfg.database.url)
-        Session = sessionmaker(bind=engine)
-        db = Session()
+        db_manager = DatabaseManager(db_url=cfg.database.url, echo=False)
+        db = db_manager.get_session()
 
         # Get state
         state_manager = StateManager(db)
@@ -95,7 +93,7 @@ def _get_service_status() -> dict:
                 status["uptime_seconds"] = uptime
 
         db.close()
-        engine.dispose()
+        db_manager.dispose()
 
         return status
 

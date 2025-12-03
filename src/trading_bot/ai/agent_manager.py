@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from src.trading_bot.models.database import TradingAgent
 from src.trading_bot.config.models import LLMConfig
 from src.trading_bot.ai.providers import BaseLLMProvider, OfficialAPIProvider, OpenRouterProvider
+from src.trading_bot.infrastructure.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -22,14 +23,14 @@ class AgentManager:
     - Support hot-reload of agents
     """
 
-    def __init__(self, db_session: Session, llm_config: LLMConfig):
+    def __init__(self, db_manager: DatabaseManager, llm_config: LLMConfig):
         """Initialize the Agent Manager.
 
         Args:
-            db_session: SQLAlchemy database session
+            db_manager: Database manager
             llm_config: LLM configuration from config.yaml
         """
-        self.db = db_session
+        self.db_manager = db_manager
         self.llm_config = llm_config
         self.agents: List[TradingAgent] = []
         self.llm_providers: Dict[str, BaseLLMProvider] = {}  # agent_id -> provider
@@ -38,11 +39,18 @@ class AgentManager:
     def _load_active_agents(self):
         """Load active agents from database and create their LLM providers."""
         # Query active agents
-        self.agents = (
-            self.db.query(TradingAgent)
-            .filter(TradingAgent.status == "active")
-            .all()
-        )
+        with self.db_manager.session_scope() as session:
+            # We need to detach objects from session to use them outside
+            # Or just load them into memory.
+            # Since TradingAgent is a simple model, we can query and expunge.
+            agents = (
+                session.query(TradingAgent)
+                .filter(TradingAgent.status == "active")
+                .all()
+            )
+            # Detach from session so they can be used after session closes
+            session.expunge_all()
+            self.agents = agents
 
         logger.info(f"Loaded {len(self.agents)} active trading agents from database")
 

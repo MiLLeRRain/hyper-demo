@@ -20,15 +20,22 @@ class TestRiskManager:
         return manager
 
     @pytest.fixture
-    def mock_db(self):
+    def mock_session(self):
         """Create mock database session."""
-        db = Mock()
-        return db
+        session = Mock()
+        return session
 
     @pytest.fixture
-    def risk_manager(self, mock_position_manager, mock_db):
+    def mock_db_manager(self, mock_session):
+        """Create mock database manager."""
+        db_manager = MagicMock()
+        db_manager.session_scope.return_value.__enter__.return_value = mock_session
+        return db_manager
+
+    @pytest.fixture
+    def risk_manager(self, mock_position_manager, mock_db_manager):
         """Create RiskManager instance."""
-        return RiskManager(mock_position_manager, mock_db)
+        return RiskManager(mock_position_manager, mock_db_manager)
 
     @pytest.fixture
     def mock_agent(self):
@@ -51,19 +58,19 @@ class TestRiskManager:
             unrealized_pnl=0.0
         )
 
-    def test_initialize(self, risk_manager, mock_position_manager):
+    def test_initialize(self, risk_manager, mock_position_manager, mock_db_manager):
         """Test RiskManager initialization."""
         assert risk_manager.position_manager == mock_position_manager
-        assert risk_manager.db is not None
+        assert risk_manager.db_manager == mock_db_manager
 
     def test_validate_trade_success(
-        self, risk_manager, mock_position_manager, mock_db, mock_agent, mock_account_info
+        self, risk_manager, mock_position_manager, mock_session, mock_agent, mock_account_info
     ):
         """Test successful trade validation."""
         agent_id = mock_agent.id
 
         # Mock database and position manager
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
         mock_position_manager.get_account_value.return_value = mock_account_info
         mock_position_manager.get_total_exposure.return_value = 0.0
 
@@ -78,9 +85,9 @@ class TestRiskManager:
         assert valid is True
         assert reason is None
 
-    def test_validate_trade_agent_not_found(self, risk_manager, mock_db):
+    def test_validate_trade_agent_not_found(self, risk_manager, mock_session):
         """Test validation when agent doesn't exist."""
-        mock_db.query.return_value.filter_by.return_value.first.return_value = None
+        mock_session.query.return_value.filter_by.return_value.first.return_value = None
 
         valid, reason = risk_manager.validate_trade(
             agent_id=uuid4(),
@@ -93,12 +100,12 @@ class TestRiskManager:
         assert reason == "Agent not found"
 
     def test_validate_trade_exceeds_max_leverage(
-        self, risk_manager, mock_position_manager, mock_db, mock_agent, mock_account_info
+        self, risk_manager, mock_position_manager, mock_session, mock_agent, mock_account_info
     ):
         """Test validation when leverage exceeds maximum."""
         agent_id = mock_agent.id
 
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
         mock_position_manager.get_account_value.return_value = mock_account_info
 
         # Try to use 20x leverage when max is 10x
@@ -115,12 +122,12 @@ class TestRiskManager:
         assert "10x" in reason
 
     def test_validate_trade_exceeds_max_position_size(
-        self, risk_manager, mock_position_manager, mock_db, mock_agent, mock_account_info
+        self, risk_manager, mock_position_manager, mock_session, mock_agent, mock_account_info
     ):
         """Test validation when position size exceeds limit."""
         agent_id = mock_agent.id
 
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
         mock_position_manager.get_account_value.return_value = mock_account_info
         mock_position_manager.get_total_exposure.return_value = 0.0
 
@@ -137,7 +144,7 @@ class TestRiskManager:
         assert "exceeds max" in reason
 
     def test_validate_trade_insufficient_margin(
-        self, risk_manager, mock_position_manager, mock_db, mock_agent, mock_account_info
+        self, risk_manager, mock_position_manager, mock_session, mock_agent, mock_account_info
     ):
         """Test validation when insufficient margin."""
         agent_id = mock_agent.id
@@ -145,7 +152,7 @@ class TestRiskManager:
         # Mock account with only $500 withdrawable
         mock_account_info.withdrawable = 500.0
 
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
         mock_position_manager.get_account_value.return_value = mock_account_info
         mock_position_manager.get_total_exposure.return_value = 0.0
 
@@ -335,12 +342,12 @@ class TestRiskManager:
         assert "ETH" in warnings[0]
 
     def test_get_max_position_size(
-        self, risk_manager, mock_position_manager, mock_db, mock_agent, mock_account_info
+        self, risk_manager, mock_position_manager, mock_session, mock_agent, mock_account_info
     ):
         """Test calculating max position size."""
         agent_id = mock_agent.id
 
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
         mock_position_manager.get_account_value.return_value = mock_account_info
 
         # Account value: $10,000, max position: 20%
@@ -348,9 +355,9 @@ class TestRiskManager:
 
         assert max_size == Decimal("2000")  # 20% of $10,000
 
-    def test_get_max_position_size_agent_not_found(self, risk_manager, mock_db):
+    def test_get_max_position_size_agent_not_found(self, risk_manager, mock_session):
         """Test max position size when agent doesn't exist."""
-        mock_db.query.return_value.filter_by.return_value.first.return_value = None
+        mock_session.query.return_value.filter_by.return_value.first.return_value = None
 
         max_size = risk_manager.get_max_position_size(uuid4())
 

@@ -14,6 +14,7 @@ from src.trading_bot.ai.prompt_builder import PromptBuilder
 from src.trading_bot.ai.decision_parser import DecisionParser, TradingDecision
 from src.trading_bot.ai.security import PromptAuditor
 from src.trading_bot.config.models import load_config
+from src.trading_bot.infrastructure.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -34,16 +35,16 @@ class MultiAgentOrchestrator:
 
     def __init__(
         self,
-        db_session: Session,
+        db_manager: DatabaseManager,
         agent_manager: AgentManager,
     ):
         """Initialize the Multi-Agent Orchestrator.
 
         Args:
-            db_session: SQLAlchemy database session
+            db_manager: Database manager
             agent_manager: AgentManager instance
         """
-        self.db = db_session
+        self.db_manager = db_manager
         self.agent_manager = agent_manager
         self.prompt_builder = PromptBuilder()
         self.decision_parser = DecisionParser()
@@ -53,8 +54,8 @@ class MultiAgentOrchestrator:
         try:
             config = load_config()
             security_config = config.security.prompt_audit if config.security else {}
-            # Pass db_session to PromptAuditor
-            self.prompt_auditor = PromptAuditor(security_config, db_session=self.db)
+            # Pass db_manager to PromptAuditor
+            self.prompt_auditor = PromptAuditor(security_config, db_manager=self.db_manager)
             logger.info(f"Security layer initialized (enabled={self.prompt_auditor.enabled})")
         except Exception as e:
             logger.warning(f"Failed to load security config, using defaults: {e}")
@@ -327,8 +328,12 @@ class MultiAgentOrchestrator:
             error_message=None
         )
 
-        self.db.add(agent_decision)
-        self.db.commit()
+        with self.db_manager.session_scope() as session:
+            session.add(agent_decision)
+            # Commit handled by session_scope
+            session.flush()
+            session.refresh(agent_decision)
+            session.expunge(agent_decision)
 
         return agent_decision
 
@@ -366,8 +371,12 @@ class MultiAgentOrchestrator:
             error_message=error_message
         )
 
-        self.db.add(agent_decision)
-        self.db.commit()
+        with self.db_manager.session_scope() as session:
+            session.add(agent_decision)
+            # Commit handled by session_scope
+            session.flush()
+            session.refresh(agent_decision)
+            session.expunge(agent_decision)
 
         return agent_decision
 
@@ -408,19 +417,20 @@ class MultiAgentOrchestrator:
         Returns:
             List of AgentDecision objects
         """
-        query = self.db.query(AgentDecision)
+        with self.db_manager.session_scope() as session:
+            query = session.query(AgentDecision)
 
-        if agent_id is not None:
-            query = query.filter(AgentDecision.agent_id == agent_id)
+            if agent_id is not None:
+                query = query.filter(AgentDecision.agent_id == agent_id)
 
-        decisions = (
-            query
-            .order_by(AgentDecision.timestamp.desc())
-            .limit(limit)
-            .all()
-        )
-
-        return decisions
+            decisions = (
+                query
+                .order_by(AgentDecision.timestamp.desc())
+                .limit(limit)
+                .all()
+            )
+            session.expunge_all()
+            return decisions
 
     def get_agent_performance(self, agent_id: int) -> Dict[str, Any]:
         """Get performance statistics for an agent.
@@ -431,11 +441,13 @@ class MultiAgentOrchestrator:
         Returns:
             Dictionary with performance stats
         """
-        decisions = (
-            self.db.query(AgentDecision)
-            .filter(AgentDecision.agent_id == agent_id)
-            .all()
-        )
+        with self.db_manager.session_scope() as session:
+            decisions = (
+                session.query(AgentDecision)
+                .filter(AgentDecision.agent_id == agent_id)
+                .all()
+            )
+            session.expunge_all()
 
         if not decisions:
             return {

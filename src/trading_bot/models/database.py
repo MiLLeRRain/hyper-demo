@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     func,
 )
+from sqlalchemy.types import JSON
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -171,7 +172,7 @@ class AgentDecision(Base):
         comment="LLM's reasoning for the decision"
     )
     chain_of_thought: Mapped[Optional[dict]] = mapped_column(
-        JSONB,
+        JSON().with_variant(JSONB, "postgresql"),
         comment="Structured Chain of Thought JSON"
     )
 
@@ -369,7 +370,7 @@ class SecurityEvent(Base):
         comment="Agent ID associated with the event (if any)"
     )
     metadata_json: Mapped[Optional[dict]] = mapped_column(
-        JSONB,
+        JSON().with_variant(JSONB, "postgresql"),
         comment="Additional metadata"
     )
 

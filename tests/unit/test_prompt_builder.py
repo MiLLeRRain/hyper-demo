@@ -226,7 +226,7 @@ class TestPromptBuilder:
 
         # Check risk management rules
         assert "AVOID OVER-TRADING" in section
-        assert "High Conviction Only" in section
+        assert "Conviction & Aggression" in section
         
         # Check JSON format instructions
         assert "CHAIN_OF_THOUGHT" in section

@@ -21,9 +21,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import yaml
 import argparse
 from decimal import Decimal
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session
+from sqlalchemy import text
 from trading_bot.models.database import TradingAgent
+from trading_bot.infrastructure.database import DatabaseManager
 
 
 def load_config(config_path: str = "config.yaml") -> dict:
@@ -61,14 +61,15 @@ def sync_agents(reset: bool = False, update: bool = False, db_url: str = None):
     # Connect to database
     if db_url is None:
         db_url = get_db_url()
-    engine = create_engine(db_url, echo=False)
+    
+    db_manager = DatabaseManager(db_url=db_url, echo=False)
 
-    with Session(engine) as session:
+    with db_manager.session_scope() as session:
         # Reset if requested
         if reset:
             print("\n[!] Resetting: Deleting all existing agents...")
             session.execute(text("DELETE FROM trading_agents"))
-            session.commit()
+            # session.commit() is handled by session_scope
             print("[+] All agents deleted\n")
 
         # Sync each agent
@@ -118,8 +119,7 @@ def sync_agents(reset: bool = False, update: bool = False, db_url: str = None):
             print(f"[+] Added: {name} - {status}")
             added += 1
 
-        # Commit
-        session.commit()
+        # Commit is handled by session_scope
 
         # Summary
         print(f"\n{'='*60}")
@@ -138,6 +138,9 @@ def sync_agents(reset: bool = False, update: bool = False, db_url: str = None):
         for agent in all_agents:
             icon = "[ON]" if agent.status == 'active' else "[OFF]"
             print(f"  {icon} {agent.name:20s} ({agent.llm_model:15s}) {agent.status}")
+    
+    # Dispose engine
+    db_manager.dispose()
 
 
 def main():

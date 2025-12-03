@@ -15,14 +15,15 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any
 
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker, joinedload
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 from dotenv import load_dotenv
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from trading_bot.models.database import AgentDecision, AgentTrade, TradingAgent
+from trading_bot.infrastructure.database import DatabaseManager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -33,9 +34,8 @@ def main():
     
     # Connect to Database
     db_url = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
-    engine = create_engine(db_url)
-    Session = sessionmaker(bind=engine)
-    session = Session()
+    db_manager = DatabaseManager(db_url=db_url)
+    session = db_manager.get_session()
     
     logger.info("Connected to database")
 
@@ -127,6 +127,9 @@ def main():
     if wins + losses > 0:
         win_rate = (wins / (wins + losses)) * 100
         print(f"Win Rate (Closed Trades): {win_rate:.2f}%")
+        
+    session.close()
+    db_manager.dispose()
 
 if __name__ == "__main__":
     main()

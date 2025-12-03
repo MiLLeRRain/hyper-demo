@@ -14,18 +14,17 @@ from typing import Any, Dict, List, Optional, Tuple
 from eth_account import Account
 from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
-from hyperliquid.utils import constants
 
 logger = logging.getLogger(__name__)
 
 
-class OrderType:
+class OrderType:  # pylint: disable=too-few-public-methods
     """Order type constants."""
     LIMIT = "limit"
     MARKET = "market"
 
 
-class HyperLiquidExecutor:
+class HyperLiquidExecutor:  # pylint: disable=too-many-instance-attributes
     """Execute trades on HyperLiquid Exchange using official SDK.
 
     This executor wraps the official HyperLiquid Python SDK and adds
@@ -38,13 +37,14 @@ class HyperLiquidExecutor:
         wallet_address: Wallet address derived from private key
     """
 
+    # pylint: disable=too-many-positional-arguments
     def __init__(
         self,
         base_url: str,
         private_key: str,
         vault_address: Optional[str] = None,
         timeout: int = 10,
-        use_dynamic_assets: bool = True,
+        use_dynamic_assets: bool = True,  # pylint: disable=unused-argument
         dry_run: bool = False
     ):
         """Initialize executor with official HyperLiquid SDK.
@@ -56,20 +56,6 @@ class HyperLiquidExecutor:
             timeout: Request timeout in seconds
             use_dynamic_assets: Compatibility parameter (always uses SDK's dynamic loading)
             dry_run: If True, simulate trades without executing
-
-        Example:
-            >>> # Real trading on testnet
-            >>> executor = HyperLiquidExecutor(
-            ...     "https://api.hyperliquid-testnet.xyz",
-            ...     "0xprivatekey",
-            ...     dry_run=False
-            ... )
-            >>> # Dry-run mode (testing)
-            >>> executor = HyperLiquidExecutor(
-            ...     "https://api.hyperliquid-testnet.xyz",
-            ...     "0xprivatekey",
-            ...     dry_run=True
-            ... )
         """
         self.base_url = base_url.rstrip("/")
         self.dry_run = dry_run
@@ -79,7 +65,7 @@ class HyperLiquidExecutor:
         if not private_key.startswith("0x"):
             private_key = "0x" + private_key
 
-        self.wallet = Account.from_key(private_key)
+        self.wallet = Account.from_key(private_key)  # pylint: disable=no-value-for-parameter
         self.wallet_address = self.wallet.address
 
         # Initialize official SDK components
@@ -100,58 +86,57 @@ class HyperLiquidExecutor:
         # Dry-run tracking
         self._dry_run_order_id_counter = 10000
         self._dry_run_orders: Dict[int, Dict[str, Any]] = {}
-        
+
         # Metadata cache
         self._meta_cache = None
         self._sz_decimals_cache = {}
 
         mode_str = "DRY-RUN MODE" if self.dry_run else "LIVE MODE"
         logger.info(
-            f"Initialized HyperLiquidExecutor for {self.wallet_address} [{mode_str}]"
+            "Initialized HyperLiquidExecutor for %s [%s]",
+            self.wallet_address, mode_str
         )
 
     def _get_sz_decimals(self, coin: str) -> int:
         """Get allowed size decimals for a coin from exchange metadata.
-        
+
         Args:
             coin: Asset symbol
-            
+
         Returns:
             Number of decimals allowed for size
         """
         # Use cache if available
         if coin in self._sz_decimals_cache:
             return self._sz_decimals_cache[coin]
-            
+
         try:
             # Fetch metadata if not cached
             if self._meta_cache is None:
                 self._meta_cache = self.info.meta()
-                
+
             universe = self._meta_cache.get("universe", [])
             for asset in universe:
                 if asset["name"] == coin:
-                    sz_decimals = asset.get("szDecimals", 3) # Default to 3 if missing
+                    sz_decimals = asset.get("szDecimals", 3)  # Default to 3 if missing
                     self._sz_decimals_cache[coin] = sz_decimals
                     return sz_decimals
-                    
+
             # Fallback defaults if coin not found in meta
-            if coin == "BTC": return 5
-            if coin == "ETH": return 4
-            if coin == "SOL": return 2
-            return 3
-            
-        except Exception as e:
-            logger.warning(f"Failed to fetch size decimals for {coin}: {e}")
-            return 3 # Safe default
+            defaults = {"BTC": 5, "ETH": 4, "SOL": 2}
+            return defaults.get(coin, 3)
+
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to fetch size decimals for %s: %s", coin, e)
+            return 3  # Safe default
 
     def _round_size(self, coin: str, size: float) -> float:
         """Round size to allowed decimals.
-        
+
         Args:
             coin: Asset symbol
             size: Size to round
-            
+
         Returns:
             Rounded size
         """
@@ -171,19 +156,13 @@ class HyperLiquidExecutor:
 
         Returns:
             List of asset/coin symbols
-
-        Example:
-            >>> executor = HyperLiquidExecutor(...)
-            >>> assets = executor.get_supported_assets()
-            >>> print(assets[:5])
-            ['BTC', 'ETH', 'SOL', 'AVAX', 'MATIC']
         """
         try:
             meta = self.info.meta()
             universe = meta.get("universe", [])
             return [asset["name"] for asset in universe]
-        except Exception as e:
-            logger.error(f"Failed to fetch supported assets: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to fetch supported assets: %s", e)
             # Return common assets as fallback
             return ["BTC", "ETH", "SOL", "AVAX", "MATIC", "LINK", "UNI", "AAVE"]
 
@@ -196,11 +175,6 @@ class HyperLiquidExecutor:
 
         Returns:
             Price rounded to valid tick size
-
-        Note:
-            This uses a simplified tick size mapping. For most assets at typical
-            price ranges, this should work. For production, consider fetching
-            exact tick sizes from exchange metadata if available.
         """
         # Common tick sizes based on price ranges
         # BTC, ETH use $10 tick at high prices
@@ -218,6 +192,116 @@ class HyperLiquidExecutor:
 
         return round(price / tick) * tick
 
+    # pylint: disable=too-many-positional-arguments
+    def _execute_dry_run_order(
+        self,
+        coin: str,
+        is_buy: bool,
+        size: Decimal,
+        price: Optional[Decimal],
+        order_type: str,
+        reduce_only: bool
+    ) -> Tuple[bool, int, None]:
+        """Execute a dry-run order simulation."""
+        self._dry_run_order_id_counter += 1
+        order_id = self._dry_run_order_id_counter
+
+        self._dry_run_orders[order_id] = {
+            "coin": coin,
+            "is_buy": is_buy,
+            "size": float(size),
+            "price": float(price) if price else None,
+            "order_type": order_type,
+            "reduce_only": reduce_only,
+            "timestamp": time.time(),
+            "status": "filled"  # Simulate immediate fill
+        }
+
+        logger.info(
+            "[DRY-RUN] Simulated order: %s %s %s @ %s (OID: %s)",
+            coin,
+            'BUY' if is_buy else 'SELL',
+            size,
+            price or 'MARKET',
+            order_id
+        )
+        return True, order_id, None
+
+    def _calculate_market_price(self, coin: str, is_buy: bool) -> Decimal:
+        """Calculate market price with slippage for market orders."""
+        try:
+            # Fetch current market price
+            all_mids = self.info.all_mids()
+            current_price = float(all_mids.get(coin, 0))
+            logger.info("Market price for %s: %s", coin, current_price)
+
+            if current_price == 0:
+                logger.warning(
+                    "Could not fetch price for %s, using default extreme price",
+                    coin
+                )
+                return Decimal("1000000") if is_buy else Decimal("0.1")
+
+            # Add 5% slippage for market orders
+            slippage = 0.05
+            if is_buy:
+                return Decimal(str(current_price * (1 + slippage)))
+            return Decimal(str(current_price * (1 - slippage)))
+
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to fetch current price for market order: %s", e)
+            return Decimal("1000000") if is_buy else Decimal("0.1")
+
+    # pylint: disable=too-many-positional-arguments
+    def _process_order_response(
+        self,
+        result: Dict[str, Any],
+        coin: str,
+        is_buy: bool,
+        size: Decimal,
+        price: Optional[Decimal]
+    ) -> Tuple[bool, Optional[int], Optional[str]]:
+        """Process the response from the exchange order placement."""
+        if result and result.get("status") == "ok":
+            response_data = result.get("response", {}).get("data", {})
+            statuses = response_data.get("statuses", [])
+
+            if statuses:
+                status = statuses[0]
+
+                # Check if order was placed (resting) or filled immediately
+                if "resting" in status:
+                    order_id = status["resting"]["oid"]
+                    logger.info(
+                        "Order placed: %s %s %s @ %s (OID: %s)",
+                        coin,
+                        'BUY' if is_buy else 'SELL',
+                        size,
+                        price,
+                        order_id
+                    )
+                    return True, order_id, None
+
+                if "filled" in status:
+                    order_id = status["filled"]["oid"]
+                    logger.info(
+                        "Order filled immediately: %s %s %s (OID: %s)",
+                        coin,
+                        'BUY' if is_buy else 'SELL',
+                        size,
+                        order_id
+                    )
+                    return True, order_id, None
+
+                error = status.get("error", "Unknown error")
+                logger.error("Order rejected: %s", error)
+                return False, None, error
+
+        error_msg = result.get("response", "Unknown error") if result else "No response"
+        logger.error("Order failed: %s", error_msg)
+        return False, None, str(error_msg)
+
+    # pylint: disable=too-many-positional-arguments
     def place_order(
         self,
         coin: str,
@@ -243,35 +327,12 @@ class HyperLiquidExecutor:
 
         Returns:
             Tuple of (success, order_id, error_message)
-
-        Example:
-            >>> success, oid, error = executor.place_order(
-            ...     "BTC", True, Decimal("0.01"), Decimal("50000"), "limit"
-            ... )
-            >>> if success:
-            ...     print(f"Order placed: {oid}")
         """
         # DRY-RUN MODE: Simulate order without executing
         if self.dry_run:
-            self._dry_run_order_id_counter += 1
-            order_id = self._dry_run_order_id_counter
-
-            self._dry_run_orders[order_id] = {
-                "coin": coin,
-                "is_buy": is_buy,
-                "size": float(size),
-                "price": float(price) if price else None,
-                "order_type": order_type,
-                "reduce_only": reduce_only,
-                "timestamp": time.time(),
-                "status": "filled"  # Simulate immediate fill
-            }
-
-            logger.info(
-                f"[DRY-RUN] Simulated order: {coin} {'BUY' if is_buy else 'SELL'} "
-                f"{size} @ {price or 'MARKET'} (OID: {order_id})"
+            return self._execute_dry_run_order(
+                coin, is_buy, size, price, order_type, reduce_only
             )
-            return True, order_id, None
 
         # LIVE MODE: Use official SDK
         try:
@@ -280,25 +341,7 @@ class HyperLiquidExecutor:
                 order_type_param = {"limit": {"tif": "Ioc"}}
                 # For market orders, calculate price with slippage
                 if price is None:
-                    try:
-                        # Fetch current market price
-                        all_mids = self.info.all_mids()
-                        current_price = float(all_mids.get(coin, 0))
-                        logger.info(f"Market price for {coin}: {current_price}")
-                        
-                        if current_price == 0:
-                             logger.warning(f"Could not fetch price for {coin}, using default extreme price")
-                             price = Decimal("1000000") if is_buy else Decimal("0.1")
-                        else:
-                            # Add 5% slippage for market orders
-                            slippage = 0.05
-                            if is_buy:
-                                price = Decimal(str(current_price * (1 + slippage)))
-                            else:
-                                price = Decimal(str(current_price * (1 - slippage)))
-                    except Exception as e:
-                        logger.error(f"Failed to fetch current price for market order: {e}")
-                        price = Decimal("1000000") if is_buy else Decimal("0.1")
+                    price = self._calculate_market_price(coin, is_buy)
             else:
                 if price is None:
                     return False, None, "Limit orders require a price"
@@ -306,11 +349,14 @@ class HyperLiquidExecutor:
 
             # Round price to valid tick size
             rounded_price = self._round_price_to_tick(coin, float(price))
-            
+
             # Round size to valid decimals
             rounded_size = self._round_size(coin, float(size))
 
-            logger.info(f"Placing order: {coin} {rounded_size} @ {rounded_price} (Raw price: {price})")
+            logger.info(
+                "Placing order: %s %s @ %s (Raw price: %s)",
+                coin, rounded_size, rounded_price, price
+            )
 
             # Place order using official SDK
             result = self.exchange.order(
@@ -323,44 +369,15 @@ class HyperLiquidExecutor:
                 cloid=client_order_id
             )
 
-            # Parse result
-            if result and result.get("status") == "ok":
-                response_data = result.get("response", {}).get("data", {})
-                statuses = response_data.get("statuses", [])
+            return self._process_order_response(
+                result, coin, is_buy, size, price
+            )
 
-                if statuses:
-                    status = statuses[0]
-
-                    # Check if order was placed (resting) or filled immediately
-                    if "resting" in status:
-                        order_id = status["resting"]["oid"]
-                        logger.info(
-                            f"Order placed: {coin} {'BUY' if is_buy else 'SELL'} "
-                            f"{size} @ {price} (OID: {order_id})"
-                        )
-                        return True, order_id, None
-
-                    elif "filled" in status:
-                        order_id = status["filled"]["oid"]
-                        logger.info(
-                            f"Order filled immediately: {coin} {'BUY' if is_buy else 'SELL'} "
-                            f"{size} (OID: {order_id})"
-                        )
-                        return True, order_id, None
-
-                    else:
-                        error = status.get("error", "Unknown error")
-                        logger.error(f"Order rejected: {error}")
-                        return False, None, error
-
-            error_msg = result.get("response", "Unknown error") if result else "No response"
-            logger.error(f"Order failed: {error_msg}")
-            return False, None, str(error_msg)
-
-        except Exception as e:
-            logger.error(f"Order execution failed: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Order execution failed: %s", e)
             return False, None, str(e)
 
+    # pylint: disable=too-many-positional-arguments,logging-too-few-args
     def place_trigger_order(
         self,
         coin: str,
@@ -388,10 +405,14 @@ class HyperLiquidExecutor:
             self._dry_run_order_id_counter += 1
             order_id = self._dry_run_order_id_counter
             type_str = "Take-Profit" if is_tp else "Stop-Loss"
-            
+
             logger.info(
-                f"[DRY-RUN] Simulated {type_str} order: {coin} {'BUY' if is_buy else 'SELL'} "
-                f"{size} @ {trigger_price} (OID: {order_id})"
+                "[DRY-RUN] Simulated %s order: %s %s %s @ %s (OID: %s)",
+                type_str,
+                'BUY' if is_buy else 'SELL',
+                size,
+                trigger_price,
+                order_id
             )
             return True, order_id, None
 
@@ -400,13 +421,8 @@ class HyperLiquidExecutor:
             # Round values
             rounded_price = self._round_price_to_tick(coin, float(trigger_price))
             rounded_size = self._round_size(coin, float(size))
-            
+
             # Construct trigger order type
-            # "trigger": {
-            #     "triggerPx": 123.45,
-            #     "isMarket": True, 
-            #     "tpsl": "tp" # or "sl"
-            # }
             order_type = {
                 "trigger": {
                     "triggerPx": rounded_price,
@@ -415,11 +431,13 @@ class HyperLiquidExecutor:
                 }
             }
 
-            logger.info(f"Placing trigger order ({'TP' if is_tp else 'SL'}): {coin} {rounded_size} @ {rounded_price}")
+            type_label = 'TP' if is_tp else 'SL'
+            logger.info(  # pylint: disable=logging-too-few-args
+                "Placing trigger order (%s): %s %s @ %s",
+                type_label, coin, rounded_size, rounded_price
+            )
 
             # Place order using official SDK
-            # Note: For trigger orders, limit_px is required by the method signature but 
-            # might be ignored if isMarket is True. We pass the trigger price.
             result = self.exchange.order(
                 coin,
                 is_buy=is_buy,
@@ -436,33 +454,39 @@ class HyperLiquidExecutor:
 
                 if statuses:
                     status = statuses[0]
-                    
+
                     # Trigger orders usually return "resting" status
                     if "resting" in status:
                         order_id = status["resting"]["oid"]
                         logger.info(
-                            f"Trigger order placed: {coin} {'BUY' if is_buy else 'SELL'} "
-                            f"{size} @ {trigger_price} (OID: {order_id})"
+                            "Trigger order placed: %s %s %s @ %s (OID: %s)",
+                            coin,
+                            'BUY' if is_buy else 'SELL',
+                            size,
+                            trigger_price,
+                            order_id
                         )
                         return True, order_id, None
-                    
-                    elif "filled" in status:
+
+                    if "filled" in status:
                         # Should not happen for trigger orders usually, but handle it
                         order_id = status["filled"]["oid"]
-                        logger.info(f"Trigger order filled immediately: {coin} (OID: {order_id})")
+                        logger.info(
+                            "Trigger order filled immediately: %s (OID: %s)",
+                            coin, order_id
+                        )
                         return True, order_id, None
-                        
-                    else:
-                        error = status.get("error", "Unknown error")
-                        logger.error(f"Trigger order rejected: {error}")
-                        return False, None, error
+
+                    error = status.get("error", "Unknown error")
+                    logger.error("Trigger order rejected: %s", error)
+                    return False, None, error
 
             error_msg = result.get("response", "Unknown error") if result else "No response"
-            logger.error(f"Trigger order failed: {error_msg}")
+            logger.error("Trigger order failed: %s", error_msg)
             return False, None, str(error_msg)
 
-        except Exception as e:
-            logger.error(f"Trigger order execution failed: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Trigger order execution failed: %s", e)
             return False, None, str(e)
 
     def cancel_order(
@@ -478,36 +502,31 @@ class HyperLiquidExecutor:
 
         Returns:
             Tuple of (success, error_message)
-
-        Example:
-            >>> success, error = executor.cancel_order("BTC", 12345)
-            >>> if success:
-            ...     print("Order cancelled")
         """
         # DRY-RUN MODE: Simulate cancellation
         if self.dry_run:
             if order_id in self._dry_run_orders:
                 self._dry_run_orders[order_id]["status"] = "cancelled"
-                logger.info(f"[DRY-RUN] Cancelled order {order_id}")
+                logger.info("[DRY-RUN] Cancelled order %s", order_id)
                 return True, None
-            else:
-                logger.warning(f"[DRY-RUN] Order {order_id} not found")
-                return False, "Order not found"
+
+            logger.warning("[DRY-RUN] Order %s not found", order_id)
+            return False, "Order not found"
 
         # LIVE MODE: Use official SDK
         try:
             result = self.exchange.cancel(coin, order_id)
 
             if result and result.get("status") == "ok":
-                logger.info(f"Cancelled order {order_id} for {coin}")
+                logger.info("Cancelled order %s for %s", order_id, coin)
                 return True, None
-            else:
-                error = result.get("response", "Unknown error") if result else "No response"
-                logger.error(f"Cancel failed: {error}")
-                return False, str(error)
 
-        except Exception as e:
-            logger.error(f"Cancel order failed: {e}")
+            error = result.get("response", "Unknown error") if result else "No response"
+            logger.error("Cancel failed: %s", error)
+            return False, str(error)
+
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Cancel order failed: %s", e)
             return False, str(e)
 
     def update_leverage(
@@ -525,14 +544,9 @@ class HyperLiquidExecutor:
 
         Returns:
             Tuple of (success, error_message)
-
-        Example:
-            >>> success, error = executor.update_leverage("BTC", 5, True)
-            >>> if success:
-            ...     print("Leverage updated to 5x cross margin")
         """
         # Validate leverage
-        if not (1 <= leverage <= 50):
+        if not 1 <= leverage <= 50:
             error = f"Invalid leverage {leverage}x (must be 1-50x)"
             logger.error(error)
             return False, error
@@ -540,8 +554,8 @@ class HyperLiquidExecutor:
         # DRY-RUN MODE: Simulate leverage update
         if self.dry_run:
             logger.info(
-                f"[DRY-RUN] Updated leverage for {coin}: {leverage}x "
-                f"({'cross' if is_cross else 'isolated'})"
+                "[DRY-RUN] Updated leverage for %s: %sx (%s)",
+                coin, leverage, 'cross' if is_cross else 'isolated'
             )
             return True, None
 
@@ -551,17 +565,17 @@ class HyperLiquidExecutor:
 
             if result and result.get("status") == "ok":
                 logger.info(
-                    f"Updated leverage for {coin}: {leverage}x "
-                    f"({'cross' if is_cross else 'isolated'})"
+                    "Updated leverage for %s: %sx (%s)",
+                    coin, leverage, 'cross' if is_cross else 'isolated'
                 )
                 return True, None
-            else:
-                error = result.get("response", "Unknown error") if result else "No response"
-                logger.error(f"Leverage update failed: {error}")
-                return False, str(error)
 
-        except Exception as e:
-            logger.error(f"Leverage update failed: {e}")
+            error = result.get("response", "Unknown error") if result else "No response"
+            logger.error("Leverage update failed: %s", error)
+            return False, str(error)
+
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Leverage update failed: %s", e)
             return False, str(e)
 
     def __repr__(self) -> str:

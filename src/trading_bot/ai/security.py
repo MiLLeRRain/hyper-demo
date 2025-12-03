@@ -5,6 +5,7 @@ import re
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from src.trading_bot.models.database import SecurityEvent
+from src.trading_bot.infrastructure.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -18,18 +19,18 @@ class PromptAuditor:
     2. Potential prompt injection attempts are detected (basic heuristic).
     """
 
-    def __init__(self, config: Dict[str, Any], db_session: Optional[Session] = None):
+    def __init__(self, config: Dict[str, Any], db_manager: Optional[DatabaseManager] = None):
         """Initialize the Prompt Auditor.
 
         Args:
             config: Security configuration dictionary
-            db_session: Database session for logging events (optional)
+            db_manager: Database manager for logging events (optional)
         """
         self.enabled = config.get("enabled", True)
         self.mask_pii = config.get("mask_pii", True)
         self.block_injection = config.get("block_injection", True)
         self.pii_patterns = config.get("pii_patterns", [])
-        self.db = db_session
+        self.db_manager = db_manager
         
         # Compile regex patterns
         self._pii_regexes = []
@@ -126,19 +127,20 @@ class PromptAuditor:
         agent_id: Optional[str] = None
     ):
         """Log security event to database."""
-        if not self.db:
+        if not self.db_manager:
             return
 
         try:
-            event = SecurityEvent(
-                event_type=event_type,
-                severity=severity,
-                description=description,
-                original_content=original_content,
-                agent_id=agent_id
-            )
-            self.db.add(event)
-            self.db.commit()
+            with self.db_manager.session_scope() as session:
+                event = SecurityEvent(
+                    event_type=event_type,
+                    severity=severity,
+                    description=description,
+                    original_content=original_content,
+                    agent_id=agent_id
+                )
+                session.add(event)
+                # Commit handled by session_scope
         except Exception as e:
             logger.error(f"Failed to log security event: {e}")
 

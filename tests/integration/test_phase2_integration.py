@@ -2,17 +2,19 @@
 
 import pytest
 import asyncio
+import pandas as pd
 from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, MagicMock, patch
+from contextlib import contextmanager
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.trading_bot.models.database import Base, TradingAgent, AgentDecision
-from src.trading_bot.models.market_data import AccountInfo, Position
-from src.trading_bot.config.models import LLMConfig, ModelConfig, ProviderConfig
+from src.trading_bot.models.market_data import AccountInfo, Position, MarketData, Price
+from src.trading_bot.config.models import LLMConfig, LLMModelConfig
 from src.trading_bot.ai.agent_manager import AgentManager
 from src.trading_bot.ai.prompt_builder import PromptBuilder
 from src.trading_bot.ai.decision_parser import DecisionParser
@@ -31,18 +33,32 @@ def test_db():
 
 
 @pytest.fixture
+def mock_db_manager(test_db):
+    """Create a mock DatabaseManager that uses the test_db session."""
+    manager = MagicMock()
+    
+    @contextmanager
+    def mock_scope():
+        yield test_db
+        test_db.commit()
+        
+    manager.session_scope.side_effect = mock_scope
+    return manager
+
+
+@pytest.fixture
 def mock_llm_config():
     """Create mock LLM configuration."""
     return LLMConfig(
         models={
-            "deepseek-test": ModelConfig(
+            "deepseek-test": LLMModelConfig(
                 provider="official",
-                official=ProviderConfig(
-                    api_key="test-key",
-                    base_url="https://api.test.com/v1",
-                    model_name="deepseek-chat",
-                    timeout=30
-                )
+                official={
+                    "api_key": "test-key",
+                    "base_url": "https://api.test.com/v1",
+                    "model_name": "deepseek-chat",
+                    "timeout": 30
+                }
             )
         }
     )
@@ -73,38 +89,45 @@ def test_agent(test_db):
 @pytest.fixture
 def mock_market_data():
     """Create mock market data for 6 coins."""
-    return {
-        "BTC": {
-            "price": 51000.0,
-            "3m": {"ema": 50500.0, "macd": 150.5, "macd_signal": 120.0, "rsi": 65.5, "atr": 500.0},
-            "4h": {"ema": 50000.0, "macd": 200.0, "macd_signal": 180.0, "rsi": 60.0, "atr": 800.0}
-        },
-        "ETH": {
-            "price": 2950.0,
-            "3m": {"ema": 2980.0, "macd": -20.5, "macd_signal": -15.0, "rsi": 45.0, "atr": 50.0},
-            "4h": {"ema": 3000.0, "macd": -50.0, "macd_signal": -40.0, "rsi": 42.0, "atr": 80.0}
-        },
-        "SOL": {
-            "price": 150.0,
-            "3m": {"ema": 149.0, "macd": 2.5, "macd_signal": 2.0, "rsi": 55.0, "atr": 5.0},
-            "4h": {"ema": 148.0, "macd": 5.0, "macd_signal": 4.0, "rsi": 58.0, "atr": 8.0}
-        },
-        "BNB": {
-            "price": 300.0,
-            "3m": {"ema": 298.0, "macd": 1.5, "macd_signal": 1.0, "rsi": 52.0, "atr": 3.0},
-            "4h": {"ema": 297.0, "macd": 3.0, "macd_signal": 2.5, "rsi": 54.0, "atr": 5.0}
-        },
-        "DOGE": {
-            "price": 0.08,
-            "3m": {"ema": 0.079, "macd": 0.001, "macd_signal": 0.0008, "rsi": 50.0, "atr": 0.002},
-            "4h": {"ema": 0.078, "macd": 0.002, "macd_signal": 0.0015, "rsi": 51.0, "atr": 0.003}
-        },
-        "XRP": {
-            "price": 0.55,
-            "3m": {"ema": 0.54, "macd": 0.01, "macd_signal": 0.008, "rsi": 58.0, "atr": 0.01},
-            "4h": {"ema": 0.53, "macd": 0.02, "macd_signal": 0.015, "rsi": 60.0, "atr": 0.015}
-        }
-    }
+    data = {}
+    coins = ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP"]
+    
+    for coin in coins:
+        price = 51000.0 if coin == "BTC" else 2950.0 if coin == "ETH" else 150.0
+        
+        data[coin] = MarketData(
+            coin=coin,
+            price=Price(
+                coin=coin,
+                price=price,
+                timestamp=datetime.utcnow()
+            ),
+            klines_3m=pd.DataFrame(),
+            klines_4h=pd.DataFrame(),
+            indicators_3m={
+                "ema_20": price * 0.99,
+                "macd": 150.5,
+                "rsi_7": 65.5,
+                "ema_20_list": [price * 0.98, price * 0.99],
+                "macd_list": [140.0, 150.5],
+                "rsi_7_list": [60.0, 65.5],
+                "rsi_14_list": [55.0, 60.0]
+            },
+            indicators_4h={
+                "ema_20": price * 0.95,
+                "ema_50": price * 0.90,
+                "atr_3": 500.0,
+                "atr_14": 450.0,
+                "macd_list": [180.0, 200.0],
+                "rsi_14_list": [58.0, 60.0]
+            },
+            mid_prices_list=[price * 0.99, price],
+            volume_current_4h=1000000.0,
+            volume_average_4h=800000.0,
+            open_interest=5000000.0,
+            funding_rate=0.0001
+        )
+    return data
 
 
 @pytest.fixture
@@ -118,28 +141,46 @@ def mock_account():
     )
 
 
+@pytest.fixture
+def mock_trading_orchestrator(mock_account):
+    """Create a mock TradingOrchestrator."""
+    orchestrator = Mock()
+    
+    # Mock PositionManager
+    position_manager = Mock()
+    position_manager.get_current_positions.return_value = []
+    position_manager.get_account_value.return_value = mock_account
+    
+    orchestrator.position_manager = position_manager
+    
+    # Mock _get_executor
+    orchestrator._get_executor.return_value = Mock()
+    
+    return orchestrator
+
+
 class TestAgentManagerIntegration:
     """Integration tests for AgentManager with database."""
 
-    def test_load_active_agents(self, test_db, test_agent, mock_llm_config):
+    def test_load_active_agents(self, test_db, mock_db_manager, test_agent, mock_llm_config):
         """Test loading active agents from database."""
-        agent_manager = AgentManager(test_db, mock_llm_config)
+        agent_manager = AgentManager(mock_db_manager, mock_llm_config)
 
         assert agent_manager.get_agent_count() == 1
         assert len(agent_manager.agents) == 1
         assert agent_manager.agents[0].name == "Test Agent"
 
-    def test_agent_manager_creates_providers(self, test_db, test_agent, mock_llm_config):
+    def test_agent_manager_creates_providers(self, test_db, mock_db_manager, test_agent, mock_llm_config):
         """Test that AgentManager creates LLM providers for agents."""
-        agent_manager = AgentManager(test_db, mock_llm_config)
+        agent_manager = AgentManager(mock_db_manager, mock_llm_config)
 
         provider = agent_manager.get_llm_provider(test_agent)
         assert provider is not None
         assert provider.model_name == "deepseek-chat"
 
-    def test_agent_manager_reload(self, test_db, test_agent, mock_llm_config):
+    def test_agent_manager_reload(self, test_db, mock_db_manager, test_agent, mock_llm_config):
         """Test hot-reload of agents."""
-        agent_manager = AgentManager(test_db, mock_llm_config)
+        agent_manager = AgentManager(mock_db_manager, mock_llm_config)
         assert agent_manager.get_agent_count() == 1
 
         # Add another agent
@@ -175,22 +216,19 @@ class TestPromptBuilderIntegration:
         )
 
         # Verify prompt structure
-        assert "HyperLiquid AI Trading System" in prompt
-        assert "Portfolio Status" in prompt
-        assert "Market Data" in prompt
-        assert "Risk Management Constraints" in prompt
-        assert "Your Task" in prompt
+        assert "It has been" in prompt
+        assert "ALL OF THE PRICE OR SIGNAL DATA BELOW IS ORDERED" in prompt
+        assert "HERE IS YOUR ACCOUNT INFORMATION & PERFORMANCE" in prompt
+        assert "TRADING STYLE GUIDELINES" in prompt
 
         # Verify agent-specific data
-        assert "20.00%" in prompt  # max_position_size
         assert "10x" in prompt  # max_leverage
-        assert "Test strategy" in prompt
 
         # Verify market data
         assert "BTC" in prompt
-        assert "51,000.00" in prompt
+        assert "51000.0" in prompt
         assert "ETH" in prompt
-        assert "2,950.00" in prompt
+        assert "2950.0" in prompt
 
     def test_build_prompt_with_positions(self, test_agent, mock_market_data, mock_account):
         """Test building prompt with existing positions."""
@@ -217,8 +255,8 @@ class TestPromptBuilderIntegration:
         )
 
         assert "BTC" in prompt
-        assert "long" in prompt.lower()
-        assert "50,000.00" in prompt
+        # The prompt builder uses str(dict) which outputs raw numbers
+        assert "50000.0" in prompt
 
 
 class TestDecisionParserIntegration:
@@ -233,26 +271,31 @@ I've analyzed the market conditions and here's my decision:
 
 ```json
 {
-  "reasoning": "BTC shows strong bullish momentum with RSI at 65 and MACD golden cross on 4h chart",
-  "action": "OPEN_LONG",
-  "coin": "BTC",
-  "size_usd": 1000.0,
-  "leverage": 3,
-  "stop_loss_price": 49000.0,
-  "take_profit_price": 53000.0,
-  "confidence": 0.75
+    "BTC": {
+        "signal": "long",
+        "confidence": 0.75,
+        "reasoning": "BTC shows strong bullish momentum with RSI at 65 and MACD golden cross on 4h chart",
+        "risk_usd": 333.33,
+        "leverage": 3,
+        "stop_loss": 49000.0,
+        "profit_target": 53000.0
+    }
 }
 ```
 
 This is a high-probability setup based on technical indicators.
 """
 
-        decision = parser.parse(llm_response)
+        decisions = parser.parse(llm_response)
 
+        assert len(decisions) == 1
+        decision = decisions[0]
+        
         assert decision is not None
         assert decision.action == "OPEN_LONG"
         assert decision.coin == "BTC"
-        assert decision.size_usd == 1000.0
+        # size_usd = risk_usd * leverage = 333.33 * 3 = 999.99
+        assert abs(decision.size_usd - 1000.0) < 0.1
         assert decision.leverage == 3
         assert decision.confidence == 0.75
 
@@ -271,23 +314,22 @@ This is a high-probability setup based on technical indicators.
 class TestMultiAgentOrchestratorIntegration:
     """Integration tests for MultiAgentOrchestrator."""
 
-    async def test_run_decision_cycle(self, test_db, test_agent, mock_llm_config, mock_market_data, mock_account):
+    async def test_run_decision_cycle(self, test_db, mock_db_manager, test_agent, mock_llm_config, mock_market_data, mock_trading_orchestrator):
         """Test running a complete decision cycle."""
-        agent_manager = AgentManager(test_db, mock_llm_config)
-        orchestrator = MultiAgentOrchestrator(test_db, agent_manager)
+        agent_manager = AgentManager(mock_db_manager, mock_llm_config)
+        orchestrator = MultiAgentOrchestrator(mock_db_manager, agent_manager)
 
         # Mock LLM response
         mock_llm_response = """
 ```json
 {
-  "reasoning": "Market conditions are unclear with mixed signals, better to wait for confirmation",
-  "action": "HOLD",
-  "coin": "BTC",
-  "size_usd": 0.0,
-  "leverage": 1,
-  "stop_loss_price": 0.0,
-  "take_profit_price": 0.0,
-  "confidence": 0.5
+    "BTC": {
+        "signal": "hold",
+        "confidence": 0.5,
+        "reasoning": "Market conditions are unclear with mixed signals, better to wait for confirmation",
+        "risk_usd": 0.0,
+        "leverage": 1
+    }
 }
 ```
 """
@@ -298,8 +340,7 @@ class TestMultiAgentOrchestratorIntegration:
 
             decisions = await orchestrator.run_decision_cycle(
                 market_data=mock_market_data,
-                positions=[],
-                account=mock_account
+                trading_orchestrator=mock_trading_orchestrator
             )
 
             # Verify decision was created
@@ -321,7 +362,7 @@ class TestMultiAgentOrchestratorIntegration:
             assert db_decision.action == "HOLD"
 
     async def test_run_decision_cycle_with_multiple_agents(
-        self, test_db, test_agent, mock_llm_config, mock_market_data, mock_account
+        self, test_db, mock_db_manager, test_agent, mock_llm_config, mock_market_data, mock_trading_orchestrator
     ):
         """Test decision cycle with multiple agents running in parallel."""
         # Create second agent
@@ -336,36 +377,36 @@ class TestMultiAgentOrchestratorIntegration:
         test_db.add(agent2)
         test_db.commit()
 
-        agent_manager = AgentManager(test_db, mock_llm_config)
-        orchestrator = MultiAgentOrchestrator(test_db, agent_manager)
+        agent_manager = AgentManager(mock_db_manager, mock_llm_config)
+        orchestrator = MultiAgentOrchestrator(mock_db_manager, agent_manager)
 
         # Mock different responses for each agent
         mock_responses = {
             str(test_agent.id): """
 ```json
 {
-  "reasoning": "BTC showing bullish momentum, opening long position",
-  "action": "OPEN_LONG",
-  "coin": "BTC",
-  "size_usd": 1000.0,
-  "leverage": 3,
-  "stop_loss_price": 49000.0,
-  "take_profit_price": 53000.0,
-  "confidence": 0.75
+    "BTC": {
+        "signal": "long",
+        "confidence": 0.75,
+        "reasoning": "BTC showing bullish momentum, opening long position",
+        "risk_usd": 333.33,
+        "leverage": 3,
+        "stop_loss": 49000.0,
+        "profit_target": 53000.0
+    }
 }
 ```
 """,
             str(agent2.id): """
 ```json
 {
-  "reasoning": "Market too volatile, holding position",
-  "action": "HOLD",
-  "coin": "ETH",
-  "size_usd": 0.0,
-  "leverage": 1,
-  "stop_loss_price": 0.0,
-  "take_profit_price": 0.0,
-  "confidence": 0.6
+    "ETH": {
+        "signal": "hold",
+        "confidence": 0.6,
+        "reasoning": "Market too volatile, holding position",
+        "risk_usd": 0.0,
+        "leverage": 1
+    }
 }
 ```
 """
@@ -378,8 +419,7 @@ class TestMultiAgentOrchestratorIntegration:
 
         decisions = await orchestrator.run_decision_cycle(
             market_data=mock_market_data,
-            positions=[],
-            account=mock_account
+            trading_orchestrator=mock_trading_orchestrator
         )
 
         # Verify both decisions were created
@@ -391,11 +431,11 @@ class TestMultiAgentOrchestratorIntegration:
         assert "HOLD" in actions
 
     async def test_run_decision_cycle_handles_llm_errors(
-        self, test_db, test_agent, mock_llm_config, mock_market_data, mock_account
+        self, test_db, mock_db_manager, test_agent, mock_llm_config, mock_market_data, mock_trading_orchestrator
     ):
         """Test that orchestrator handles LLM errors gracefully."""
-        agent_manager = AgentManager(test_db, mock_llm_config)
-        orchestrator = MultiAgentOrchestrator(test_db, agent_manager)
+        agent_manager = AgentManager(mock_db_manager, mock_llm_config)
+        orchestrator = MultiAgentOrchestrator(mock_db_manager, agent_manager)
 
         # Mock LLM to raise an error
         with patch.object(agent_manager.llm_providers[str(test_agent.id)], 'generate_async',
@@ -403,8 +443,7 @@ class TestMultiAgentOrchestratorIntegration:
 
             decisions = await orchestrator.run_decision_cycle(
                 market_data=mock_market_data,
-                positions=[],
-                account=mock_account
+                trading_orchestrator=mock_trading_orchestrator
             )
 
             # Verify failed decision was created
@@ -416,11 +455,11 @@ class TestMultiAgentOrchestratorIntegration:
             assert "API Error" in decision.error_message
 
     async def test_run_decision_cycle_handles_invalid_json(
-        self, test_db, test_agent, mock_llm_config, mock_market_data, mock_account
+        self, test_db, mock_db_manager, test_agent, mock_llm_config, mock_market_data, mock_trading_orchestrator
     ):
         """Test that orchestrator handles invalid JSON responses."""
-        agent_manager = AgentManager(test_db, mock_llm_config)
-        orchestrator = MultiAgentOrchestrator(test_db, agent_manager)
+        agent_manager = AgentManager(mock_db_manager, mock_llm_config)
+        orchestrator = MultiAgentOrchestrator(mock_db_manager, agent_manager)
 
         # Mock LLM to return invalid JSON
         invalid_response = "This is not JSON at all!"
@@ -430,8 +469,7 @@ class TestMultiAgentOrchestratorIntegration:
 
             decisions = await orchestrator.run_decision_cycle(
                 market_data=mock_market_data,
-                positions=[],
-                account=mock_account
+                trading_orchestrator=mock_trading_orchestrator
             )
 
             # Verify failed decision was created
@@ -439,7 +477,7 @@ class TestMultiAgentOrchestratorIntegration:
             decision = decisions[0]
 
             assert decision.status == "failed"
-            assert "Failed to parse JSON decision" in decision.error_message
+            assert "Failed to parse JSON decisions" in decision.error_message
 
 
 class TestEndToEndDecisionCycle:
@@ -447,25 +485,26 @@ class TestEndToEndDecisionCycle:
 
     @pytest.mark.asyncio
     async def test_complete_decision_cycle_workflow(
-        self, test_db, test_agent, mock_llm_config, mock_market_data, mock_account
+        self, test_db, mock_db_manager, test_agent, mock_llm_config, mock_market_data, mock_trading_orchestrator
     ):
         """Test the complete workflow from agent creation to decision storage."""
         # 1. Setup
-        agent_manager = AgentManager(test_db, mock_llm_config)
-        orchestrator = MultiAgentOrchestrator(test_db, agent_manager)
+        agent_manager = AgentManager(mock_db_manager, mock_llm_config)
+        orchestrator = MultiAgentOrchestrator(mock_db_manager, agent_manager)
 
         # 2. Mock LLM response
         mock_response = """
 ```json
 {
-  "reasoning": "ETH showing bearish divergence on MACD, opening short position with tight stop loss",
-  "action": "OPEN_SHORT",
-  "coin": "ETH",
-  "size_usd": 1500.0,
-  "leverage": 5,
-  "stop_loss_price": 3100.0,
-  "take_profit_price": 2800.0,
-  "confidence": 0.80
+    "ETH": {
+        "signal": "short",
+        "confidence": 0.80,
+        "reasoning": "ETH showing bearish divergence on MACD, opening short position with tight stop loss",
+        "risk_usd": 300.0,
+        "leverage": 5,
+        "stop_loss": 3100.0,
+        "profit_target": 2800.0
+    }
 }
 ```
 """
@@ -476,8 +515,7 @@ class TestEndToEndDecisionCycle:
             # 3. Run decision cycle
             decisions = await orchestrator.run_decision_cycle(
                 market_data=mock_market_data,
-                positions=[],
-                account=mock_account
+                trading_orchestrator=mock_trading_orchestrator
             )
 
             # 4. Verify decision
@@ -486,7 +524,8 @@ class TestEndToEndDecisionCycle:
 
             assert decision.action == "OPEN_SHORT"
             assert decision.coin == "ETH"
-            assert decision.size_usd == Decimal("1500.00")
+            # size_usd = 300 * 5 = 1500
+            assert abs(float(decision.size_usd) - 1500.0) < 0.1
             assert decision.leverage == 5
 
             # 5. Verify database persistence

@@ -16,6 +16,12 @@ def main():
     load_dotenv()
 
     private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY")
+    if not private_key:
+        private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY_DEFAULT")
+        
+    if not private_key:
+        print("Error: HYPERLIQUID_PRIVATE_KEY not found in environment")
+        return
 
     print("=" * 70)
     print("Direct Order Placement Test")

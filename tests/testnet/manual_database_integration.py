@@ -19,9 +19,9 @@ from decimal import Decimal
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 
+from trading_bot.infrastructure.database import DatabaseManager
 from trading_bot.models.database import (
     Base,
     TradingAgent,
@@ -61,8 +61,9 @@ def main():
 
         print(f"\n  Connecting to: postgresql://{db_user}:***@{db_host}:{db_port}/{db_name}")
 
-        # Create engine
-        engine = create_engine(db_url, echo=False)
+        # Initialize DatabaseManager
+        db_manager = DatabaseManager(db_url)
+        engine = db_manager.engine
 
         # Test connection
         with engine.connect() as conn:
@@ -125,18 +126,21 @@ def main():
     print_section("Step 3: Test CRUD Operations")
 
     # Create session
-    Session = sessionmaker(bind=engine)
-    session = Session()
+    session = db_manager.get_session()
 
     try:
         # Create a trading agent
         print("\n  Creating TradingAgent...")
         agent = TradingAgent(
             name="Test Agent",
-            provider="deepseek",
-            model="deepseek-chat",
-            is_active=True,
-            config={"temperature": 0.7, "max_tokens": 500}
+            llm_model="deepseek-chat",
+            exchange_account="hyperliquid_main",
+            initial_balance=Decimal("1000.00"),
+            status="active",
+            max_position_size=Decimal("20.00"),
+            max_leverage=10,
+            stop_loss_pct=Decimal("2.00"),
+            take_profit_pct=Decimal("5.00")
         )
         session.add(agent)
         session.commit()
@@ -147,71 +151,53 @@ def main():
         decision = AgentDecision(
             agent_id=agent.id,
             coin="BTC",
-            action="BUY",
-            confidence=0.75,
+            action="OPEN_LONG",
+            confidence=Decimal("0.75"),
             reasoning="Test decision for integration test",
-            entry_price=Decimal("50000.00"),
-            position_size=Decimal("0.01"),
+            size_usd=Decimal("100.00"),
             leverage=2,
-            stop_loss=Decimal("48000.00"),
-            take_profit=Decimal("52000.00"),
-            market_data={"price": 50000, "volume": 1000000}
+            stop_loss_price=Decimal("48000.00"),
+            take_profit_price=Decimal("52000.00"),
+            status="success"
         )
         session.add(decision)
         session.commit()
         print(f"  [OK] Created decision: {decision.action} {decision.coin} (ID: {decision.id})")
 
-        # Create an order
-        print("\n  Creating Order...")
-        order = Order(
+        # Create a trade (replaces Order/Position concepts in this schema)
+        print("\n  Creating AgentTrade...")
+        trade = AgentTrade(
             agent_id=agent.id,
             decision_id=decision.id,
             coin="BTC",
-            side="BUY",
-            order_type="LIMIT",
-            size=Decimal("0.01"),
-            price=Decimal("50000.00"),
-            status="FILLED",
-            exchange_order_id="test_order_123",
-            filled_size=Decimal("0.01"),
-            average_fill_price=Decimal("50000.00")
-        )
-        session.add(order)
-        session.commit()
-        print(f"  [OK] Created order: {order.side} {order.size} {order.coin} (ID: {order.id})")
-
-        # Create a position
-        print("\n  Creating Position...")
-        position = Position(
-            agent_id=agent.id,
-            coin="BTC",
-            side="LONG",
-            size=Decimal("0.01"),
+            side="long",
+            size=Decimal("0.002"),
             entry_price=Decimal("50000.00"),
-            current_price=Decimal("51000.00"),
-            leverage=2,
-            unrealized_pnl=Decimal("20.00"),
-            is_open=True
+            status="open",
+            unrealized_pnl=Decimal("20.00")
         )
-        session.add(position)
+        session.add(trade)
         session.commit()
-        print(f"  [OK] Created position: {position.side} {position.size} {position.coin} (ID: {position.id})")
+        print(f"  [OK] Created trade: {trade.side} {trade.size} {trade.coin} (ID: {trade.id})")
 
-        # Create performance metric
-        print("\n  Creating PerformanceMetric...")
-        metric = PerformanceMetric(
+        # Create performance snapshot
+        print("\n  Creating AgentPerformance...")
+        perf = AgentPerformance(
             agent_id=agent.id,
-            total_trades=1,
-            winning_trades=1,
-            losing_trades=0,
+            total_value=Decimal("1020.00"),
+            cash_balance=Decimal("900.00"),
+            position_value=Decimal("120.00"),
+            realized_pnl=Decimal("0.00"),
+            unrealized_pnl=Decimal("20.00"),
             total_pnl=Decimal("20.00"),
-            win_rate=Decimal("1.00"),
-            sharpe_ratio=Decimal("2.5"),
-            max_drawdown=Decimal("0.00")
+            roi_percent=Decimal("2.00"),
+            num_trades=1,
+            num_winning_trades=0,
+            num_losing_trades=0
         )
-        session.add(metric)
+        session.add(perf)
         session.commit()
-        print(f"  [OK] Created metric for agent {agent.name} (ID: {metric.id})")
+        print(f"  [OK] Created performance snapshot for agent {agent.name} (ID: {perf.id})")
 
     except Exception as e:
         print(f"\n[ERROR] CRUD operations failed: {e}")
@@ -229,16 +215,15 @@ def main():
 
         print(f"\n  Agent: {agent.name}")
         print(f"    Decisions: {len(agent.decisions)}")
-        print(f"    Orders: {len(agent.orders)}")
-        print(f"    Positions: {len(agent.positions)}")
-        print(f"    Metrics: {len(agent.performance_metrics)}")
+        print(f"    Trades: {len(agent.trades)}")
+        print(f"    Performance Snapshots: {len(agent.performance_snapshots)}")
 
-        # Test decision -> orders relationship
+        # Test decision -> trades relationship
         session.refresh(decision)
         print(f"\n  Decision: {decision.action} {decision.coin}")
-        print(f"    Orders: {len(decision.orders)}")
-        if decision.orders:
-            print(f"    Order Status: {decision.orders[0].status}")
+        print(f"    Trades: {len(decision.trades)}")
+        if decision.trades:
+            print(f"    Trade Status: {decision.trades[0].status}")
 
         print("\n  [OK] All relationships working")
 
@@ -253,30 +238,18 @@ def main():
 
     try:
         # Query active agents
-        active_agents = session.query(TradingAgent).filter_by(is_active=True).all()
+        active_agents = session.query(TradingAgent).filter_by(status="active").all()
         print(f"\n  Active agents: {len(active_agents)}")
 
         # Query recent decisions
         recent_decisions = session.query(AgentDecision).order_by(
-            AgentDecision.created_at.desc()
+            AgentDecision.timestamp.desc()
         ).limit(10).all()
         print(f"  Recent decisions: {len(recent_decisions)}")
 
-        # Query open positions
-        open_positions = session.query(Position).filter_by(is_open=True).all()
-        print(f"  Open positions: {len(open_positions)}")
-
-        # Query filled orders
-        filled_orders = session.query(Order).filter_by(status="FILLED").all()
-        print(f"  Filled orders: {len(filled_orders)}")
-
-        # Aggregate query - total PnL
-        total_pnl = session.query(
-            Position
-        ).filter_by(is_open=False).with_entities(
-            text("COALESCE(SUM(realized_pnl), 0)")
-        ).scalar() or Decimal("0")
-        print(f"  Total realized PnL: ${total_pnl:.2f}")
+        # Query open trades
+        open_trades = session.query(AgentTrade).filter_by(status="open").all()
+        print(f"  Open trades: {len(open_trades)}")
 
         print("\n  [OK] All queries working")
 
@@ -290,23 +263,18 @@ def main():
     print_section("Step 6: Test Updates")
 
     try:
-        # Update order status
-        order.status = "CANCELLED"
+        # Update trade status
+        trade.status = "closed"
+        trade.exit_price = Decimal("52000.00")
+        trade.realized_pnl = Decimal("40.00")
+        trade.exit_time = datetime.now(UTC)
         session.commit()
-        print(f"\n  [OK] Updated order status to {order.status}")
+        print(f"\n  [OK] Closed trade with PnL ${trade.realized_pnl}")
 
-        # Update position
-        position.current_price = Decimal("52000.00")
-        position.unrealized_pnl = Decimal("40.00")
+        # Update agent balance
+        agent.initial_balance += trade.realized_pnl
         session.commit()
-        print(f"  [OK] Updated position price to ${position.current_price}")
-
-        # Close position
-        position.is_open = False
-        position.realized_pnl = position.unrealized_pnl
-        position.closed_at = datetime.now(UTC)
-        session.commit()
-        print(f"  [OK] Closed position with PnL ${position.realized_pnl}")
+        print(f"  [OK] Updated agent balance to ${agent.initial_balance}")
 
     except Exception as e:
         print(f"\n[ERROR] Update test failed: {e}")
@@ -329,9 +297,8 @@ def main():
     print("\n  Database Statistics:")
     print(f"    Agents: {session.query(TradingAgent).count()}")
     print(f"    Decisions: {session.query(AgentDecision).count()}")
-    print(f"    Orders: {session.query(Order).count()}")
-    print(f"    Positions: {session.query(Position).count()}")
-    print(f"    Metrics: {session.query(PerformanceMetric).count()}")
+    print(f"    Trades: {session.query(AgentTrade).count()}")
+    print(f"    Performance Snapshots: {session.query(AgentPerformance).count()}")
 
     # Cleanup
     session.close()

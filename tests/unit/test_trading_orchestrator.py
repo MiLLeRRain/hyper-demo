@@ -69,15 +69,22 @@ class TestTradingOrchestrator:
         return manager
 
     @pytest.fixture
-    def mock_db(self):
+    def mock_session(self):
         """Create mock database session."""
-        db = Mock()
-        return db
+        session = Mock()
+        return session
+
+    @pytest.fixture
+    def mock_db_manager(self, mock_session):
+        """Create mock database manager."""
+        db_manager = MagicMock()
+        db_manager.session_scope.return_value.__enter__.return_value = mock_session
+        return db_manager
 
     @pytest.fixture
     def orchestrator(
         self, mock_executor, mock_order_manager, mock_position_manager,
-        mock_risk_manager, mock_db
+        mock_risk_manager, mock_db_manager
     ):
         """Create TradingOrchestrator instance."""
         return TradingOrchestrator(
@@ -86,7 +93,7 @@ class TestTradingOrchestrator:
             order_manager=mock_order_manager,
             position_manager=mock_position_manager,
             risk_manager=mock_risk_manager,
-            db_session=mock_db
+            db_manager=mock_db_manager
         )
 
     @pytest.fixture
@@ -121,23 +128,23 @@ class TestTradingOrchestrator:
         decision.coin = "BTC"
         return decision
 
-    def test_initialize(self, orchestrator, mock_executor):
+    def test_initialize(self, orchestrator, mock_executor, mock_db_manager):
         """Test TradingOrchestrator initialization."""
         assert orchestrator.executors["default"] == mock_executor
         assert orchestrator.order_manager is not None
         assert orchestrator.position_manager is not None
         assert orchestrator.risk_manager is not None
-        assert orchestrator.db is not None
+        assert orchestrator.db_manager == mock_db_manager
 
     def test_execute_decision_hold(
-        self, orchestrator, mock_db, mock_agent
+        self, orchestrator, mock_session, mock_agent
     ):
         """Test executing HOLD decision."""
         decision = Mock(spec=AgentDecision)
         decision.id = uuid4()
         decision.action = "HOLD"
 
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
             decision, mock_agent
         ]
 
@@ -149,9 +156,9 @@ class TestTradingOrchestrator:
         assert success is True
         assert error is None
 
-    def test_execute_decision_not_found(self, orchestrator, mock_db):
+    def test_execute_decision_not_found(self, orchestrator, mock_session):
         """Test executing non-existent decision."""
-        mock_db.query.return_value.filter_by.return_value.first.return_value = None
+        mock_session.query.return_value.filter_by.return_value.first.return_value = None
 
         success, error = orchestrator.execute_decision(
             agent_id=uuid4(),
@@ -162,10 +169,10 @@ class TestTradingOrchestrator:
         assert error == "Decision not found"
 
     def test_execute_decision_agent_not_found(
-        self, orchestrator, mock_db, mock_decision_open_long
+        self, orchestrator, mock_session, mock_decision_open_long
     ):
         """Test executing decision when agent doesn't exist."""
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
             mock_decision_open_long, None
         ]
 
@@ -178,11 +185,11 @@ class TestTradingOrchestrator:
         assert error == "Agent not found"
 
     def test_execute_decision_open_long_success(
-        self, orchestrator, mock_db, mock_agent, mock_decision_open_long,
+        self, orchestrator, mock_session, mock_agent, mock_decision_open_long,
         mock_risk_manager, mock_executor, mock_position_manager, mock_order_manager
     ):
         """Test successfully opening long position."""
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
             mock_decision_open_long, mock_agent
         ]
 
@@ -215,7 +222,7 @@ class TestTradingOrchestrator:
         assert call_args["order_type"] == OrderType.MARKET
 
     def test_execute_decision_open_short_success(
-        self, orchestrator, mock_db, mock_agent, mock_risk_manager,
+        self, orchestrator, mock_session, mock_agent, mock_risk_manager,
         mock_executor, mock_position_manager, mock_order_manager
     ):
         """Test successfully opening short position."""
@@ -228,7 +235,7 @@ class TestTradingOrchestrator:
         decision.stop_loss_price = None
         decision.take_profit_price = None
 
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
             decision, mock_agent
         ]
 
@@ -245,11 +252,11 @@ class TestTradingOrchestrator:
         assert call_args["side"] == OrderSide.SHORT
 
     def test_execute_decision_risk_rejection(
-        self, orchestrator, mock_db, mock_agent, mock_decision_open_long,
+        self, orchestrator, mock_session, mock_agent, mock_decision_open_long,
         mock_risk_manager
     ):
         """Test opening position rejected by risk manager."""
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
             mock_decision_open_long, mock_agent
         ]
 
@@ -266,11 +273,11 @@ class TestTradingOrchestrator:
         assert "Insufficient margin" in error
 
     def test_execute_decision_leverage_failure(
-        self, orchestrator, mock_db, mock_agent, mock_decision_open_long,
+        self, orchestrator, mock_session, mock_agent, mock_decision_open_long,
         mock_executor
     ):
         """Test opening position when leverage update fails."""
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
             mock_decision_open_long, mock_agent
         ]
 
@@ -286,11 +293,11 @@ class TestTradingOrchestrator:
         assert "Failed to set leverage" in error
 
     def test_execute_decision_trade_execution_failure(
-        self, orchestrator, mock_db, mock_agent, mock_decision_open_long,
+        self, orchestrator, mock_session, mock_agent, mock_decision_open_long,
         mock_order_manager
     ):
         """Test opening position when trade execution fails."""
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
             mock_decision_open_long, mock_agent
         ]
 
@@ -306,7 +313,7 @@ class TestTradingOrchestrator:
         assert "Trade execution failed" in error
 
     def test_execute_decision_close_position_success(
-        self, orchestrator, mock_db, mock_agent, mock_decision_close,
+        self, orchestrator, mock_session, mock_agent, mock_decision_close,
         mock_position_manager, mock_executor
     ):
         """Test successfully closing position."""
@@ -325,7 +332,7 @@ class TestTradingOrchestrator:
 
         mock_position_manager.get_current_positions.return_value = [position]
 
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
             mock_decision_close, mock_agent
         ]
 
@@ -345,7 +352,7 @@ class TestTradingOrchestrator:
         assert call_args["reduce_only"] is True
 
     def test_execute_decision_close_short_position(
-        self, orchestrator, mock_db, mock_agent, mock_decision_close,
+        self, orchestrator, mock_session, mock_agent, mock_decision_close,
         mock_position_manager, mock_executor
     ):
         """Test closing short position."""
@@ -364,7 +371,7 @@ class TestTradingOrchestrator:
 
         mock_position_manager.get_current_positions.return_value = [position]
 
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
             mock_decision_close, mock_agent
         ]
 
@@ -380,13 +387,13 @@ class TestTradingOrchestrator:
         assert call_args["is_buy"] is True  # Buy to close short
 
     def test_execute_decision_close_no_position(
-        self, orchestrator, mock_db, mock_agent, mock_decision_close,
+        self, orchestrator, mock_session, mock_agent, mock_decision_close,
         mock_position_manager
     ):
         """Test closing position when none exists."""
         mock_position_manager.get_current_positions.return_value = []
 
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
             mock_decision_close, mock_agent
         ]
 
@@ -399,7 +406,7 @@ class TestTradingOrchestrator:
         assert "No open position" in error
 
     def test_execute_decision_close_order_failure(
-        self, orchestrator, mock_db, mock_agent, mock_decision_close,
+        self, orchestrator, mock_session, mock_agent, mock_decision_close,
         mock_position_manager, mock_executor
     ):
         """Test closing position when order fails."""
@@ -418,7 +425,7 @@ class TestTradingOrchestrator:
         mock_position_manager.get_current_positions.return_value = [position]
         mock_executor.place_order.return_value = (False, None, "Insufficient margin")
 
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
             mock_decision_close, mock_agent
         ]
 
@@ -431,14 +438,14 @@ class TestTradingOrchestrator:
         assert "Close failed" in error
 
     def test_execute_decision_unknown_action(
-        self, orchestrator, mock_db, mock_agent
+        self, orchestrator, mock_session, mock_agent
     ):
         """Test executing decision with unknown action."""
         decision = Mock(spec=AgentDecision)
         decision.id = uuid4()
         decision.action = "INVALID_ACTION"
 
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
             decision, mock_agent
         ]
 

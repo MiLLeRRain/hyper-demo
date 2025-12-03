@@ -69,7 +69,11 @@ def test_account_access():
 
     private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY")
     if not private_key:
-        print("\n[FAIL] HYPERLIQUID_PRIVATE_KEY not found in environment")
+        # Try fallback to DEFAULT key
+        private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY_DEFAULT")
+        
+    if not private_key:
+        print("\n[FAIL] HYPERLIQUID_PRIVATE_KEY (or HYPERLIQUID_PRIVATE_KEY_DEFAULT) not found in environment")
         print("       Please set it in your .env file")
         return False
 

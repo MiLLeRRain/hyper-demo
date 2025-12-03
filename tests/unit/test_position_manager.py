@@ -24,15 +24,22 @@ class TestPositionManager:
         return client
 
     @pytest.fixture
-    def mock_db(self):
+    def mock_session(self):
         """Create mock database session."""
-        db = Mock()
-        return db
+        session = Mock()
+        return session
 
     @pytest.fixture
-    def position_manager(self, mock_client, mock_db):
+    def mock_db_manager(self, mock_session):
+        """Create mock database manager."""
+        db_manager = MagicMock()
+        db_manager.session_scope.return_value.__enter__.return_value = mock_session
+        return db_manager
+
+    @pytest.fixture
+    def position_manager(self, mock_client, mock_db_manager):
         """Create PositionManager instance."""
-        return PositionManager(mock_client, mock_db)
+        return PositionManager(mock_client, mock_db_manager)
 
     @pytest.fixture
     def mock_agent(self):
@@ -62,28 +69,28 @@ class TestPositionManager:
 
         return [trade1, trade2]
 
-    def test_initialize(self, position_manager, mock_client):
+    def test_initialize(self, position_manager, mock_client, mock_db_manager):
         """Test PositionManager initialization."""
         assert position_manager.info_client == mock_client
-        assert position_manager.db is not None
+        assert position_manager.db_manager == mock_db_manager
 
-    def test_get_current_positions_empty(self, position_manager, mock_db):
+    def test_get_current_positions_empty(self, position_manager, mock_session):
         """Test getting positions when none exist."""
-        mock_db.query.return_value.filter_by.return_value.all.return_value = []
+        mock_session.query.return_value.filter_by.return_value.all.return_value = []
 
         positions = position_manager.get_current_positions(uuid4())
 
         assert len(positions) == 0
 
     def test_get_current_positions_long(
-        self, position_manager, mock_client, mock_db, mock_agent, mock_open_trades
+        self, position_manager, mock_client, mock_session, mock_agent, mock_open_trades
     ):
         """Test getting long position."""
         agent_id = mock_agent.id
 
         # Mock database queries
-        mock_db.query.return_value.filter_by.return_value.all.return_value = [mock_open_trades[0]]
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        mock_session.query.return_value.filter_by.return_value.all.return_value = [mock_open_trades[0]]
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
         # Mock price (current > entry, so profit)
         price_obj = Mock()
@@ -104,14 +111,14 @@ class TestPositionManager:
         assert pos.unrealized_pnl == 200.0  # 0.1 * (50000 - 48000)
 
     def test_get_current_positions_short(
-        self, position_manager, mock_client, mock_db, mock_agent, mock_open_trades
+        self, position_manager, mock_client, mock_session, mock_agent, mock_open_trades
     ):
         """Test getting short position."""
         agent_id = mock_agent.id
 
         # Mock database queries
-        mock_db.query.return_value.filter_by.return_value.all.return_value = [mock_open_trades[1]]
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        mock_session.query.return_value.filter_by.return_value.all.return_value = [mock_open_trades[1]]
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
         # Mock price (current < entry, so profit for short)
         price_obj = Mock()
@@ -130,14 +137,14 @@ class TestPositionManager:
         assert pos.unrealized_pnl == expected_pnl  # 100
 
     def test_get_current_positions_multiple(
-        self, position_manager, mock_client, mock_db, mock_agent, mock_open_trades
+        self, position_manager, mock_client, mock_session, mock_agent, mock_open_trades
     ):
         """Test getting multiple positions."""
         agent_id = mock_agent.id
 
         # Mock database queries
-        mock_db.query.return_value.filter_by.return_value.all.return_value = mock_open_trades
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        mock_session.query.return_value.filter_by.return_value.all.return_value = mock_open_trades
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
         # Mock prices
         def get_price_side_effect(coin):
@@ -155,13 +162,13 @@ class TestPositionManager:
         assert len(positions) == 2
 
     def test_get_current_positions_price_error(
-        self, position_manager, mock_client, mock_db, mock_agent, mock_open_trades
+        self, position_manager, mock_client, mock_session, mock_agent, mock_open_trades
     ):
         """Test handling price fetch errors."""
         agent_id = mock_agent.id
 
-        mock_db.query.return_value.filter_by.return_value.all.return_value = [mock_open_trades[0]]
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        mock_session.query.return_value.filter_by.return_value.all.return_value = [mock_open_trades[0]]
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
         # Mock price error
         mock_client.get_price.side_effect = Exception("Price API error")
@@ -171,12 +178,12 @@ class TestPositionManager:
         # Should return empty list when price fetch fails
         assert len(positions) == 0
 
-    def test_get_position(self, position_manager, mock_client, mock_db, mock_agent, mock_open_trades):
+    def test_get_position(self, position_manager, mock_client, mock_session, mock_agent, mock_open_trades):
         """Test getting a specific position by coin."""
         agent_id = mock_agent.id
 
-        mock_db.query.return_value.filter_by.return_value.all.return_value = mock_open_trades
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        mock_session.query.return_value.filter_by.return_value.all.return_value = mock_open_trades
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
         def get_price_side_effect(coin):
             price_obj = Mock()
@@ -198,12 +205,12 @@ class TestPositionManager:
         assert eth_position.coin == "ETH"
         assert sol_position is None
 
-    def test_has_position(self, position_manager, mock_client, mock_db, mock_agent, mock_open_trades):
+    def test_has_position(self, position_manager, mock_client, mock_session, mock_agent, mock_open_trades):
         """Test checking if position exists."""
         agent_id = mock_agent.id
 
-        mock_db.query.return_value.filter_by.return_value.all.return_value = [mock_open_trades[0]]
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        mock_session.query.return_value.filter_by.return_value.all.return_value = [mock_open_trades[0]]
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
         
         price_obj = Mock()
         price_obj.price = Decimal("50000")
@@ -216,14 +223,14 @@ class TestPositionManager:
         assert has_eth is False
 
     def test_get_account_value(
-        self, position_manager, mock_client, mock_db, mock_agent, mock_open_trades
+        self, position_manager, mock_client, mock_session, mock_agent, mock_open_trades
     ):
         """Test calculating account value."""
         agent_id = mock_agent.id
 
         # Mock open positions
-        mock_db.query.return_value.filter_by.return_value.all.return_value = mock_open_trades
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        mock_session.query.return_value.filter_by.return_value.all.return_value = mock_open_trades
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
         # Mock prices
         def get_price_side_effect(coin):
@@ -237,7 +244,7 @@ class TestPositionManager:
         mock_client.get_price.side_effect = get_price_side_effect
 
         # Mock realized PnL query
-        mock_db.query.return_value.filter_by.return_value.scalar.return_value = Decimal("500")
+        mock_session.query.return_value.filter_by.return_value.scalar.return_value = Decimal("500")
 
         account = position_manager.get_account_value(agent_id)
 
@@ -257,25 +264,25 @@ class TestPositionManager:
         # Margin used = 8000 / 10 (leverage) = 800
         assert account.withdrawable == 10000.0  # 10800 - 800
 
-    def test_get_account_value_agent_not_found(self, position_manager, mock_db):
+    def test_get_account_value_agent_not_found(self, position_manager, mock_session):
         """Test account value when agent doesn't exist."""
-        mock_db.query.return_value.filter_by.return_value.first.return_value = None
+        mock_session.query.return_value.filter_by.return_value.first.return_value = None
 
         with pytest.raises(ValueError, match="Agent not found"):
             position_manager.get_account_value(uuid4())
 
     def test_get_account_value_no_positions(
-        self, position_manager, mock_db, mock_agent
+        self, position_manager, mock_session, mock_agent
     ):
         """Test account value with no open positions."""
         agent_id = mock_agent.id
 
         # No open positions
-        mock_db.query.return_value.filter_by.return_value.all.return_value = []
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        mock_session.query.return_value.filter_by.return_value.all.return_value = []
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
         # No realized PnL
-        mock_db.query.return_value.filter_by.return_value.scalar.return_value = None
+        mock_session.query.return_value.filter_by.return_value.scalar.return_value = None
 
         account = position_manager.get_account_value(agent_id)
 
@@ -315,14 +322,16 @@ class TestPositionManager:
         assert size == Decimal("10")
 
     def test_get_total_exposure(
-        self, position_manager, mock_client, mock_db, mock_agent, mock_open_trades
+        self, position_manager, mock_client, mock_session, mock_agent, mock_open_trades
     ):
         """Test getting total exposure."""
         agent_id = mock_agent.id
 
-        mock_db.query.return_value.filter_by.return_value.all.return_value = mock_open_trades
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        # Mock database queries
+        mock_session.query.return_value.filter_by.return_value.all.return_value = mock_open_trades
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
+        # Mock prices
         def get_price_side_effect(coin):
             price_obj = Mock()
             if coin == "BTC":
@@ -333,7 +342,7 @@ class TestPositionManager:
 
         mock_client.get_price.side_effect = get_price_side_effect
 
-        mock_db.query.return_value.filter_by.return_value.scalar.return_value = Decimal("0")
+        mock_session.query.return_value.filter_by.return_value.scalar.return_value = Decimal("0")
 
         exposure = position_manager.get_total_exposure(agent_id)
 
@@ -343,14 +352,16 @@ class TestPositionManager:
         assert exposure == 8000.0
 
     def test_get_position_summary(
-        self, position_manager, mock_client, mock_db, mock_agent, mock_open_trades
+        self, position_manager, mock_client, mock_session, mock_agent, mock_open_trades
     ):
         """Test getting position summary."""
         agent_id = mock_agent.id
 
-        mock_db.query.return_value.filter_by.return_value.all.return_value = mock_open_trades
-        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_agent
+        # Mock database queries
+        mock_session.query.return_value.filter_by.return_value.all.return_value = mock_open_trades
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_agent
 
+        # Mock prices
         def get_price_side_effect(coin):
             price_obj = Mock()
             if coin == "BTC":

@@ -8,10 +8,12 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from threading import Event
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, Session
+# pylint: disable=unused-import
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from ..config.models import Config
+from ..infrastructure.database import DatabaseManager
 from ..data.hyperliquid_client import HyperliquidClient
 from ..data.collector import DataCollector
 from ..orchestration.multi_agent_orchestrator import MultiAgentOrchestrator
@@ -40,6 +42,8 @@ class TradingBotService:
     - Graceful shutdown
     """
 
+    # pylint: disable=too-many-instance-attributes
+
     def __init__(self, config: Config):
         """
         Initialize trading bot service.
@@ -52,15 +56,15 @@ class TradingBotService:
         self.shutdown_event = Event()
 
         # Components (initialized in start())
-        self.db_engine: Optional[Any] = None
-        self.db_session_maker: Optional[sessionmaker] = None
-        self.db_session: Optional[Session] = None
+        self.db_manager: Optional[DatabaseManager] = None
+        # self.db_session removed to avoid long-lived session issues
 
         self.info_client: Optional[HyperliquidClient] = None
         self.data_collector: Optional[DataCollector] = None
         self.agent_manager: Optional[AgentManager] = None
         self.multi_agent_orchestrator: Optional[MultiAgentOrchestrator] = None
 
+        self.executors: Dict[str, HyperLiquidExecutor] = {}
         self.executor: Optional[HyperLiquidExecutor] = None
         self.order_manager: Optional[OrderManager] = None
         self.position_manager: Optional[PositionManager] = None
@@ -87,45 +91,42 @@ class TradingBotService:
         try:
             logger.info("Starting TradingBotService...")
 
-            # 1. Initialize database
-            if not self._init_database():
+            if not self._initialize_components():
                 return False
 
-            # 2. Health checks
-            if not self._health_check():
-                return False
-
-            # 3. Initialize Phase 1 components (Data Collection)
-            if not self._init_phase1_components():
-                return False
-
-            # 4. Initialize Phase 2 components (AI Integration)
-            if not self._init_phase2_components():
-                return False
-
-            # 5. Initialize Phase 3 components (Trading Execution)
-            if not self._init_phase3_components():
-                return False
-
-            # 6. Initialize Phase 4 components (Automation)
-            if not self._init_phase4_components():
-                return False
-
-            # 7. Start scheduler
-            self.scheduler.start()
+            # Start scheduler
+            if self.scheduler:
+                self.scheduler.start()
 
             self.running = True
             logger.info("✅ TradingBotService started successfully")
 
-            # 8. Main loop (wait for shutdown signal)
+            # Main loop (wait for shutdown signal)
             self._run_loop()
 
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to start TradingBotService: {e}", exc_info=True)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to start TradingBotService: %s", e, exc_info=True)
             self.stop()
             return False
+
+    def _initialize_components(self) -> bool:
+        """Initialize all components in sequence."""
+        steps = [
+            (self._init_database, "Database"),
+            (self._health_check, "Health checks"),
+            (self._init_phase1_components, "Phase 1 (Data Collection)"),
+            (self._init_phase2_components, "Phase 2 (AI Integration)"),
+            (self._init_phase3_components, "Phase 3 (Trading Execution)"),
+            (self._init_phase4_components, "Phase 4 (Automation)"),
+        ]
+
+        for step_func, step_name in steps:
+            if not step_func():
+                logger.error("Failed to initialize %s", step_name)
+                return False
+        return True
 
     def stop(self) -> bool:
         """
@@ -146,20 +147,15 @@ class TradingBotService:
                 logger.info("Stopping scheduler...")
                 self.scheduler.stop()
 
-            # Close database connections
-            if self.db_session:
-                logger.info("Closing database session...")
-                self.db_session.close()
-
-            if self.db_engine:
+            if self.db_manager:
                 logger.info("Disposing database engine...")
-                self.db_engine.dispose()
+                self.db_manager.dispose()
 
             logger.info("✅ TradingBotService stopped successfully")
             return True
 
-        except Exception as e:
-            logger.error(f"Error stopping TradingBotService: {e}", exc_info=True)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Error stopping TradingBotService: %s", e, exc_info=True)
             return False
 
     def get_status(self) -> Dict[str, Any]:
@@ -172,7 +168,7 @@ class TradingBotService:
         status = {
             "running": self.running,
             "components_initialized": {
-                "database": self.db_engine is not None,
+                "database": self.db_manager is not None,
                 "data_collector": self.data_collector is not None,
                 "multi_agent_orchestrator": self.multi_agent_orchestrator is not None,
                 "trading_orchestrator": self.trading_orchestrator is not None,
@@ -186,20 +182,22 @@ class TradingBotService:
                 state = self.state_manager.load_state()
                 if state:
                     status.update({
-                        "uptime_seconds": (time.time() - state.get("service_start_time", time.time())),
+                        "uptime_seconds": (
+                            time.time() - state.get("service_start_time", time.time())
+                        ),
                         "cycle_count": state.get("cycle_count", 0),
                         "last_cycle_time": state.get("last_cycle_time"),
                         "last_error": state.get("last_error")
                     })
-            except Exception as e:
-                logger.warning(f"Failed to load state: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.warning("Failed to load state: %s", e)
 
         # Add scheduler status
         if self.scheduler:
             try:
                 status["next_run_time"] = self.scheduler.get_next_run_time()
-            except Exception as e:
-                logger.warning(f"Failed to get next run time: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.warning("Failed to get next run time: %s", e)
 
         return status
 
@@ -208,29 +206,19 @@ class TradingBotService:
         try:
             logger.info("Initializing database...")
 
-            db_url = self.config.database.url
-
-            # Create engine with connection pool
-            self.db_engine = create_engine(
-                db_url,
+            self.db_manager = DatabaseManager(
+                db_url=self.config.database.url,
                 pool_size=self.config.database.pool_size,
                 max_overflow=self.config.database.max_overflow,
                 pool_timeout=self.config.database.pool_timeout,
-                pool_recycle=3600,  # Recycle connections after 1 hour
                 echo=False
             )
-
-            # Create session maker
-            self.db_session_maker = sessionmaker(bind=self.db_engine)
-
-            # Create session
-            self.db_session = self.db_session_maker()
 
             logger.info("✅ Database initialized")
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to initialize database: {e}", exc_info=True)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to initialize database: %s", e, exc_info=True)
             return False
 
     def _health_check(self) -> bool:
@@ -239,11 +227,10 @@ class TradingBotService:
             logger.info("Performing health checks...")
 
             # Check database connection
-            try:
-                self.db_session.execute(text("SELECT 1"))
+            if self.db_manager and self.db_manager.check_connection():
                 logger.info("✅ Database connection OK")
-            except Exception as e:
-                logger.error(f"Database health check failed: {e}")
+            else:
+                logger.error("Database health check failed")
                 return False
 
             # Check HyperLiquid API (Info API)
@@ -255,19 +242,22 @@ class TradingBotService:
                 # Try to get a price
                 price = test_client.get_price("BTC")
                 if price:
-                    logger.info(f"✅ HyperLiquid API connection OK (BTC price: ${price.price:.2f})")
+                    logger.info(
+                        "✅ HyperLiquid API connection OK (BTC price: $%.2f)",
+                        price.price
+                    )
                 else:
                     logger.error("HyperLiquid API returned no data")
                     return False
-            except Exception as e:
-                logger.error(f"HyperLiquid API health check failed: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.error("HyperLiquid API health check failed: %s", e)
                 return False
 
             logger.info("✅ All health checks passed")
             return True
 
-        except Exception as e:
-            logger.error(f"Health check failed: {e}", exc_info=True)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Health check failed: %s", e, exc_info=True)
             return False
 
     def _init_phase1_components(self) -> bool:
@@ -290,8 +280,8 @@ class TradingBotService:
             logger.info("✅ Phase 1 components initialized")
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to initialize Phase 1 components: {e}", exc_info=True)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to initialize Phase 1 components: %s", e, exc_info=True)
             return False
 
     def _init_phase2_components(self) -> bool:
@@ -301,21 +291,21 @@ class TradingBotService:
 
             # Agent manager
             self.agent_manager = AgentManager(
-                db_session=self.db_session,
+                db_manager=self.db_manager,
                 llm_config=self.config.llm
             )
 
             # Multi-agent orchestrator
             self.multi_agent_orchestrator = MultiAgentOrchestrator(
-                db_session=self.db_session,
+                db_manager=self.db_manager,
                 agent_manager=self.agent_manager
             )
 
             logger.info("✅ Phase 2 components initialized")
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to initialize Phase 2 components: {e}", exc_info=True)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to initialize Phase 2 components: %s", e, exc_info=True)
             return False
 
     def _init_phase3_components(self) -> bool:
@@ -325,20 +315,23 @@ class TradingBotService:
 
             # Initialize executors for all configured accounts
             self.executors = {}
-            
+
             # Identify accounts used by enabled agents
             enabled_accounts = {
-                agent.account 
-                for agent in self.config.agents 
+                agent.account
+                for agent in self.config.agents
                 if agent.enabled and agent.account
             }
-            
+
             # 1. Load from new 'accounts' list
             if self.config.hyperliquid.accounts:
                 for account in self.config.hyperliquid.accounts:
                     # Skip initialization if account is not used by any enabled agent
                     if account.name not in enabled_accounts:
-                        logger.info(f"Skipping initialization for unused account: {account.name}")
+                        logger.info(
+                            "Skipping initialization for unused account: %s",
+                            account.name
+                        )
                         continue
 
                     try:
@@ -350,9 +343,12 @@ class TradingBotService:
                             timeout=self.config.hyperliquid.timeout
                         )
                         self.executors[account.name] = executor
-                        logger.info(f"Initialized executor for account: {account.name}")
-                    except Exception as e:
-                        logger.error(f"Failed to initialize executor for {account.name}: {e}")
+                        logger.info("Initialized executor for account: %s", account.name)
+                    except Exception as e:  # pylint: disable=broad-exception-caught
+                        logger.error(
+                            "Failed to initialize executor for %s: %s",
+                            account.name, e
+                        )
 
             # 2. Fallback to legacy 'private_key' if no accounts or specific legacy config
             if not self.executors and self.config.hyperliquid.private_key:
@@ -371,54 +367,39 @@ class TradingBotService:
             # Set primary executor (for backward compatibility)
             self.executor = next(iter(self.executors.values()))
 
-            # Order manager (needs to be aware of multiple executors, or we pass orchestrator)
-            # For now, OrderManager might need refactoring, but let's see.
-            # Actually, OrderManager takes 'executor'. We might need to update it too.
-            # Or better, TradingOrchestrator handles the routing, and OrderManager just executes?
-            # No, OrderManager executes. So OrderManager needs the map or Orchestrator passes the right executor.
-            
-            # Let's pass the map to TradingOrchestrator, and let it handle the routing.
-            # But OrderManager is initialized here.
-            
-            # Temporary fix: OrderManager still takes one executor (the default one).
-            # We will update TradingOrchestrator to use the map and pass the right executor to OrderManager methods?
-            # Or create multiple OrderManagers?
-            
-            # Let's update TradingOrchestrator to take the map.
-            
             self.order_manager = OrderManager(
-                executor=self.executor, # Default one
-                db_session=self.db_session
+                executor=self.executor,  # Default one
+                db_manager=self.db_manager
             )
 
             # Position manager
             self.position_manager = PositionManager(
                 info_client=self.info_client,
-                db_session=self.db_session,
-                executor=self.executor # Default one
+                db_manager=self.db_manager,
+                executor=self.executor  # Default one
             )
 
             # Risk manager
             self.risk_manager = RiskManager(
                 position_manager=self.position_manager,
-                db_session=self.db_session
+                db_manager=self.db_manager
             )
 
             # Trading orchestrator
             self.trading_orchestrator = TradingOrchestrator(
-                executors=self.executors, # Pass the map!
+                executors=self.executors,  # Pass the map!
                 default_executor=self.executor,
                 order_manager=self.order_manager,
                 position_manager=self.position_manager,
                 risk_manager=self.risk_manager,
-                db_session=self.db_session
+                db_manager=self.db_manager
             )
 
             logger.info("✅ Phase 3 components initialized")
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to initialize Phase 3 components: {e}", exc_info=True)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to initialize Phase 3 components: %s", e, exc_info=True)
             return False
 
     def _init_phase4_components(self) -> bool:
@@ -427,7 +408,7 @@ class TradingBotService:
             logger.info("Initializing Phase 4 components...")
 
             # State manager
-            self.state_manager = StateManager(db_session=self.db_session)
+            self.state_manager = StateManager(db_manager=self.db_manager)
 
             # Trading cycle executor
             self.cycle_executor = TradingCycleExecutor(
@@ -435,7 +416,7 @@ class TradingBotService:
                 multi_agent_orchestrator=self.multi_agent_orchestrator,
                 trading_orchestrator=self.trading_orchestrator,
                 state_manager=self.state_manager,
-                db_session=self.db_session
+                db_manager=self.db_manager
             )
 
             # Scheduler
@@ -447,8 +428,8 @@ class TradingBotService:
             logger.info("✅ Phase 4 components initialized")
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to initialize Phase 4 components: {e}", exc_info=True)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to initialize Phase 4 components: %s", e, exc_info=True)
             return False
 
     def _run_loop(self) -> None:
@@ -462,12 +443,12 @@ class TradingBotService:
 
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt")
-        except Exception as e:
-            logger.error(f"Error in main loop: {e}", exc_info=True)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Error in main loop: %s", e, exc_info=True)
 
-    def _signal_handler(self, signum, frame):
+    def _signal_handler(self, signum, frame):  # pylint: disable=unused-argument
         """Handle shutdown signals."""
-        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        logger.info("Received signal %s, initiating graceful shutdown...", signum)
         self.stop()
         sys.exit(0)
 
